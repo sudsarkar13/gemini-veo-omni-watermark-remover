@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@gvowr/engine": "workspace:*",
+    "@gvowr/ipc": "workspace:*",
     "@gvowr/video": "workspace:*"
   },
   "devDependencies": {

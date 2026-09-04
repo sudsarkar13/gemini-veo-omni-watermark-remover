@@ -1,6 +1,6 @@
 import { cpus, freemem, totalmem } from "node:os"
 
-import type { ClipInfo, ResourceEstimate } from "./ipc.ts"
+import type { ClipInfo, ResourceEstimate } from "@gvowr/ipc"
 
 /**
  * Pre-flight resource estimation.

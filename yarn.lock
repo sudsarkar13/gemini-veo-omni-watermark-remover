@@ -823,6 +823,7 @@ __metadata:
   resolution: "@gvowr/desktop@workspace:apps/desktop"
   dependencies:
     "@gvowr/engine": "workspace:*"
+    "@gvowr/ipc": "workspace:*"
     "@gvowr/video": "workspace:*"
     electron: "npm:^44.2.0"
     esbuild: "npm:^0.28.2"
@@ -837,6 +838,14 @@ __metadata:
     typescript: "npm:^5.9.3"
   bin:
     gvowr: ./src/bin.ts
+  languageName: unknown
+  linkType: soft
+
+"@gvowr/ipc@workspace:*, @gvowr/ipc@workspace:packages/ipc":
+  version: 0.0.0-use.local
+  resolution: "@gvowr/ipc@workspace:packages/ipc"
+  dependencies:
+    typescript: "npm:^5.9.3"
   languageName: unknown
   linkType: soft
 
@@ -4358,6 +4367,7 @@ __metadata:
   resolution: "gemini-veo-omni-watermark-remover@workspace:."
   dependencies:
     "@base-ui/react": "npm:^1.8.0"
+    "@gvowr/ipc": "workspace:*"
     "@shadcn/react": "npm:^0.3.1"
     "@tailwindcss/postcss": "npm:^4.3.3"
     "@types/node": "npm:^26"

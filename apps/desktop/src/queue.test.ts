@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, it } from "node:test"
 
 import { isFinished, outputPathFor } from "./queue.ts"
-import type { JobState } from "./ipc.ts"
+import type { JobState } from "@gvowr/ipc"
 
 describe("outputPathFor", () => {
   it("writes beside the source by default", () => {

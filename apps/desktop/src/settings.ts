@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
-import { DEFAULT_SETTINGS, type Settings } from "./ipc.ts"
+import { DEFAULT_SETTINGS, type Settings } from "@gvowr/ipc"
 
 /**
  * Settings persistence.

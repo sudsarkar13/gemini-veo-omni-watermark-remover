@@ -3,7 +3,7 @@ import { totalmem } from "node:os"
 import { describe, it } from "node:test"
 
 import { estimate, formatBytes, formatDuration } from "./estimate.ts"
-import type { ClipInfo } from "./ipc.ts"
+import type { ClipInfo } from "@gvowr/ipc"
 
 function clip(patch: Partial<ClipInfo> = {}): ClipInfo {
   return {

@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs"
-import { stat } from "node:fs/promises"
+import { stat, writeFile } from "node:fs/promises"
 import { cpus, freemem, totalmem } from "node:os"
 import { join, normalize, resolve, sep } from "node:path"
 import { Readable } from "node:stream"
@@ -18,7 +18,7 @@ const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = electron
 
 import { resolveBinaries } from "@gvowr/video"
 
-import { CHANNELS, EVENTS, ACCEPTED_EXTENSIONS, type Job, type JobOptions, type JobProgress, type Settings, type SystemInfo } from "./ipc.ts"
+import { CHANNELS, EVENTS, ACCEPTED_EXTENSIONS, type Job, type JobOptions, type JobProgress, type Settings, type SystemInfo } from "@gvowr/ipc"
 import { JobQueue } from "./queue.ts"
 import { SettingsStore } from "./settings.ts"
 
@@ -111,6 +111,23 @@ async function createWindow(): Promise<void> {
       "window.gvowr ? Object.keys(window.gvowr).length : 0"
     )
     process.stdout.write(`SMOKE title=${JSON.stringify(title)} bridge=${bridge} methods=${methods}\n`)
+
+    // Optionally seed the queue first, so the populated layout can be inspected and
+    // not just the empty state.
+    const seed = process.env["GVOWR_SMOKE_ADD"]
+    if (seed) {
+      await queue.add([seed])
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+    }
+
+    // Optional screenshot, so the rendered result can be inspected rather than
+    // inferred from the fact that nothing threw.
+    const shot = process.env["GVOWR_SMOKE_SHOT"]
+    if (shot) {
+      const image = await window.webContents.capturePage()
+      await writeFile(shot, image.toPNG())
+      process.stdout.write(`SMOKE shot=${shot}\n`)
+    }
     app.exit(bridge === "object" && methods > 0 ? 0 : 1)
   }
 }

@@ -17,6 +17,10 @@ const nextConfig: NextConfig = {
   // Electron serves index.html directly, so trailing-slash directory URLs would
   // resolve to the wrong place under the custom protocol handler.
   trailingSlash: false,
+  // The IPC contract is a workspace package of raw TypeScript, shared so the shell
+  // and the renderer cannot drift apart. Next has to compile it rather than expect
+  // a published build.
+  transpilePackages: ["@gvowr/ipc"],
 };
 
 export default nextConfig;

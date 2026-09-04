@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 import { loadTemplatePpm, syntheticDiamond, type AlphaMap } from "@gvowr/engine"
 import { processVideo } from "@gvowr/video"
 
-import type { JobOptions } from "./ipc.ts"
+import type { JobOptions } from "@gvowr/ipc"
 
 /**
  * Child process that runs one job.

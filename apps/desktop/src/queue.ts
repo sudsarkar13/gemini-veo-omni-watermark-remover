@@ -7,7 +7,7 @@ import { hasCalibratedProfile } from "@gvowr/engine"
 import { probe } from "@gvowr/video"
 
 import { estimate } from "./estimate.ts"
-import type { ClipInfo, Job, JobOptions, JobProgress, JobState } from "./ipc.ts"
+import type { ClipInfo, Job, JobOptions, JobProgress, JobState } from "@gvowr/ipc"
 import type { StartMessage, WorkerMessage } from "./worker.ts"
 
 /**

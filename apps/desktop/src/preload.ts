@@ -11,7 +11,7 @@ import {
   type JobOptions,
   type JobProgress,
   type Settings,
-} from "./ipc.ts"
+} from "@gvowr/ipc"
 
 /**
  * The only bridge between the renderer and the operating system.

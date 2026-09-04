@@ -1,0 +1,16 @@
+{
+  "name": "@gvowr/ipc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The contract between the Electron main process and the renderer. Types only, no runtime dependencies.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
