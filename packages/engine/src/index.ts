@@ -71,3 +71,5 @@ export {
   type PlanOptions,
   type RenderReport,
 } from "./pipeline.ts"
+export { decodePpm, encodePpm } from "./ppm.ts"
+export { loadTemplatePpm, syntheticDiamond } from "./templates.ts"
