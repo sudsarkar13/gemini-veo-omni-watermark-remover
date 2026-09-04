@@ -66,13 +66,25 @@ Constants, consistent across every independent implementation studied:
 | `ALPHA_THRESHOLD` | `0.002` | Ignore near-zero alpha (noise) |
 | `MAX_ALPHA` | `0.99` | Avoid division by near-zero |
 | `LOGO_VALUE` | `255` | The mark is pure white |
-| `gain` | `~0.6` current marks, `1.0` legacy | Intensity tuning multiplier |
+| `gain` | `1.0` against the measured template | Intensity tuning multiplier |
+| `MIN_RING_SPREAD` | `2` | Floor on the background spread a correction is judged against |
 
 The **alpha map** is a template of the logo captured against black, where
 `alpha = luminance / 255`. Prior art derives these templates by **frame-differencing
 watermark on/off transition pairs** — high-dynamic-range scenes (lightning flash, light
 bulb, sunrise) where the background swings hard while the mark stays fixed, averaged
 over 10+ pairs.
+
+**We now have our own capture**, derived without needing transition pairs. The mark is
+a constant overlay, so across a clip whose content moves behind it the per-pixel low
+percentile is taken where the source was darkest; wherever the source reaches black at
+least once, that value *is* `255·α`. Subtracting the black floor measured on the border
+inverts `v = b·(1−α) + 255·α` exactly. `scripts/derive-template.mjs` does this, and
+`packages/engine/assets/veo-diamond-48.ppm` is the result: 48×48, peak `α ≈ 0.31`,
+measured from Veo 720p output. It is the engine's default template.
+
+The synthetic stand-in remains only for fixtures with no provenance. Thresholds tuned
+against it were meaningless, which was demonstrated the hard way — see §9.
 
 The only irrecoverable case is a pixel that clipped at 255 under the mark; that
 information is genuinely gone.
@@ -112,8 +124,11 @@ information is genuinely gone.
 
 - Gemini 3.6 images: 48×48 diamond at every output size, bottom-right.
 - Gemini 3.5 images: 36×36 small / 96×96 large.
-- Veo 720p variant 1: 48×48 at margin (72, 72) — ~1.5 Mbps tier.
-- Veo 720p variant 2: 44×44 at margin (29, 40) — ~7 Mbps tier.
+- Veo 720p variant 1: 48×48 at margin (72, 72) — ~1.5 Mbps tier. *(upstream, not re-measured)*
+- Veo 720p variant 2: 44×44 at margin (29, 40) — ~7 Mbps tier. *(upstream, not re-measured)*
+- **Veo 720p inset: 48×48 at margin (96, 96)** — measured here, ink at x 1136–1183,
+  y 576–623 in a 1280×720 frame. The first placement verified end to end against our
+  own capture, and none of the upstream margins match it.
 - Four alpha templates exist upstream: `bg_48`, `bg_96` (variant 1) and `bg_b_36`,
   `bg_b_96` (variant 2).
 
@@ -407,12 +422,39 @@ ground truth rather than guesses:
 - Sample clips where the mark appears **away from the bottom-right corner**.
 - Samples at **9:16**, **1:1**, and **4K** — resolutions upstream explicitly has no
   calibration for, and 9:16 covers most real Veo output.
-- Watermark on/off transition pairs, if obtainable, for deriving our own alpha templates.
+- ~~Watermark on/off transition pairs, for deriving our own alpha templates.~~ Not
+  needed: `scripts/derive-template.mjs` recovers the alpha from any single clip whose
+  background goes dark under the mark (§2).
 
 ### Alpha template provenance
 
-Start from the MIT-licensed upstream templates with attribution, then build our own
-frame-differencing calibration harness for the resolutions nobody has covered.
+`packages/engine/assets/veo-diamond-48.ppm` is our own measurement and is the default.
+The upstream MIT templates remain available with attribution for variants we have not
+captured. Every new resolution needs its own measurement, not arithmetic from this one.
+
+### What the first real clip changed
+
+Running against real Veo footage rather than fixtures invalidated four things at once,
+and it is worth recording why each survived so long:
+
+1. **The template was a synthetic stand-in.** Detection scored 0.44 against a mark it
+   now scores 0.79 on. Nothing downstream could work reliably.
+2. **The verifier rejected the genuine mark.** Against black sky the background ring's
+   standard deviation is ~0.5, so a correction accurate to 0.86 of one 8-bit level
+   scored 1.6σ and failed a 0.6σ test. Fixed by flooring the spread at the encoder's
+   noise (`MIN_RING_SPREAD`).
+3. **The bisection reported failures as successes.** Where no intensity reconciled a
+   patch, the search walked to its ceiling and the endpoint was returned as "the gain
+   that worked" — subtracting diamond-shaped holes out of real content. A candidate
+   whose residual never changes sign is now rejected outright.
+4. **The fixtures were unrealistic.** ±32 levels of uncorrelated noise, roughly six
+   times a real H.264 encode, which depressed every score and made a 0.35 detection
+   threshold look reasonable. At realistic noise a genuine mark scores 0.78.
+
+The lesson is the one already written into `templates.ts`: a threshold tuned against a
+stand-in means nothing. Detection now uses a separate, much higher bar to *start* a
+track from a full-frame sweep (`DEFAULT_DISCOVERY_THRESHOLD`) than to keep following
+one, because those two decisions carry very different costs.
 
 ---
 
