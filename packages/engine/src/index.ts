@@ -52,3 +52,12 @@ export {
   type SearchOptions,
   type SizedTemplate,
 } from "./detect.ts"
+export {
+  buildTracks,
+  consolidate,
+  ingestFrame,
+  type ConsolidationResult,
+  type MutableTrack,
+  type Observation,
+  type TrackOptions,
+} from "./track.ts"

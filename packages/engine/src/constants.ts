@@ -20,3 +20,14 @@ export const LOGO_VALUE = 255
 
 /** Default intensity multiplier for current Gemini/Veo marks. Legacy marks use 1.0. */
 export const DEFAULT_GAIN = 0.6
+
+/**
+ * Largest alpha change permitted between adjacent frames.
+ *
+ * Per-frame intensity is measured independently, so a single bad frame — a hard
+ * occlusion, a blown highlight — can produce a wildly wrong estimate. Uncapped, that
+ * shows up as a visible flash in the output, which is far more objectionable than a
+ * slightly imperfect removal. Capping the step means one bad reading is absorbed
+ * rather than displayed.
+ */
+export const ALPHA_STEP_CAP = 0.05
