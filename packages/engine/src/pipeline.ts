@@ -79,12 +79,25 @@ const DEFAULT_SWEEP_INTERVAL = 15
 const DEFAULT_TRACK_RADIUS = 8
 
 /**
- * Pass 0 and 1: analyse every frame and follow marks through the clip.
+ * Incremental planner: feed it one frame at a time, then ask for the plan.
  *
- * Takes an iterable of frames rather than a file so the engine stays free of I/O.
- * Phase 2 feeds this from an FFmpeg pipe; the tests feed it synthetic frames.
+ * Frames arrive this way rather than as an array because a clip cannot be held in
+ * memory — 1080p RGB is ~6 MB per frame, so a one-minute clip is around 11 GB. The
+ * planner keeps only observations, which are a few numbers per detection, so pass 1
+ * streams in constant memory regardless of clip length.
+ *
+ * Rendering then decodes the source a second time. Two decodes is the price of the
+ * two-pass design, and it is what buys the ability to correct a frame using evidence
+ * from frames after it.
  */
-export function planClip(frames: Iterable<Frame>, map: AlphaMap, options: PlanOptions = {}): ClipPlan {
+export interface ClipPlanner {
+  /** Feeds the next frame. Frames must arrive in order, starting at index 0. */
+  push(frame: Frame): void
+  /** Runs consolidation and returns the finished plan. */
+  finish(): ClipPlan
+}
+
+export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPlanner {
   const mode = options.mode ?? "auto"
   const sweepInterval = options.sweepInterval ?? DEFAULT_SWEEP_INTERVAL
   const trackRadius = options.trackRadius ?? DEFAULT_TRACK_RADIUS
@@ -101,7 +114,7 @@ export function planClip(frames: Iterable<Frame>, map: AlphaMap, options: PlanOp
   let templates: SizedTemplate[] | null = null
   let searchSizes: readonly number[] = []
 
-  for (const frame of frames) {
+  function push(frame: Frame): void {
     if (index === 0) {
       width = frame.width
       height = frame.height
@@ -161,36 +174,58 @@ export function planClip(frames: Iterable<Frame>, map: AlphaMap, options: PlanOp
     index++
   }
 
-  const { tracks, rejected } = buildTracks(perFrame, options)
+  function finish(): ClipPlan {
+    const { tracks, rejected } = buildTracks(perFrame, options)
 
-  let detected = 0
-  let interpolated = 0
-  let occluded = 0
-  for (const track of tracks) {
-    for (const frame of track.frames.values()) {
-      if (frame.state === "detected") detected++
-      else if (frame.state === "interpolated") interpolated++
-      else occluded++
+    let detected = 0
+    let interpolated = 0
+    let occluded = 0
+    for (const track of tracks) {
+      for (const frame of track.frames.values()) {
+        if (frame.state === "detected") detected++
+        else if (frame.state === "interpolated") interpolated++
+        else occluded++
+      }
     }
-  }
 
-  return {
-    tracks,
-    diagnostics: {
-      width,
-      height,
-      frameCount: index,
-      calibratedResolution: width > 0 && hasCalibratedProfile(width, height),
-      mode,
-      sweeps,
-      tracksRejected: rejected,
-      framesDetected: detected,
-      framesInterpolated: interpolated,
-      framesOccluded: occluded,
-      elapsedMs: Date.now() - started,
-      frames: reports,
-    },
-  }
+    return {
+      tracks,
+      diagnostics: {
+        width,
+        height,
+        frameCount: index,
+        calibratedResolution: width > 0 && hasCalibratedProfile(width, height),
+        mode,
+        sweeps,
+        tracksRejected: rejected,
+        framesDetected: detected,
+        framesInterpolated: interpolated,
+        framesOccluded: occluded,
+        elapsedMs: Date.now() - started,
+        frames: reports,
+      },
+    }
+    }
+
+  return { push, finish }
+}
+
+/** Convenience wrapper for a clip already held in memory, such as in tests. */
+export function planClip(frames: Iterable<Frame>, map: AlphaMap, options: PlanOptions = {}): ClipPlan {
+  const planner = createPlanner(map, options)
+  for (const frame of frames) planner.push(frame)
+  return planner.finish()
+}
+
+/** Streaming variant, for frames arriving from a decoder pipe. */
+export async function planClipAsync(
+  frames: AsyncIterable<Frame>,
+  map: AlphaMap,
+  options: PlanOptions = {}
+): Promise<ClipPlan> {
+  const planner = createPlanner(map, options)
+  for await (const frame of frames) planner.push(frame)
+  return planner.finish()
 }
 
 /** The sized template closest to an established track's size. */
