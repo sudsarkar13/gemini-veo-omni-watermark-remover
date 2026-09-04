@@ -23,7 +23,11 @@ function frame(width: number, height: number, seedOffset: number): Frame {
   let seed = (0x9e3779b1 ^ seedOffset) >>> 0
   for (let i = 0; i < width * height; i++) {
     seed = (seed * 1664525 + 1013904223) >>> 0
-    const noise = (seed >>> 25) & 0x3f
+    // Noise amplitude matters here. Uncorrelated noise is what suppresses correlation
+    // scores, and at +/-32 levels — roughly six times a real H.264 encode — a genuine
+    // mark scores 0.50 instead of the 0.78 it scores on real footage. A fixture that
+    // noisy makes any detection threshold tuned against it meaningless.
+    const noise = (seed >>> 25) & 0x0f
     const base = 70 + Math.round(60 * ((i % width) / width)) + noise
     data[i * 3] = base
     data[i * 3 + 1] = base
