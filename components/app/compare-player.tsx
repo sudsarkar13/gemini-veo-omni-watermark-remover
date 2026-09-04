@@ -32,12 +32,14 @@ const COMPARE_MODES: readonly { value: CompareMode; label: string }[] = [
 ]
 
 export function ComparePlayer({
+  className,
   media,
   frameRate,
   currentTime,
   onTimeChange,
   onDurationChange,
 }: {
+  className?: string
   media: ClipMedia
   frameRate: number
   currentTime: number
@@ -120,22 +122,50 @@ export function ComparePlayer({
   }, [])
 
   return (
-    <div className="flex flex-col gap-2">
-      <div
-        ref={containerRef}
-        className="relative overflow-hidden rounded-md border border-border bg-black"
-        style={{ aspectRatio: media.aspectRatio }}
-        onMouseMove={(event) => {
-          if (mode === "split" && event.buttons === 1) onSplitDrag(event)
-        }}
-      >
-        {mode === "side" && hasAfter ? (
-          <div className="grid h-full grid-cols-2 gap-px">
-            <Layer label="Original">
+    <div className={cn("flex flex-col gap-2", className)}>
+      {/*
+       * The monitor takes the height it is given and derives its width from the clip's
+       * aspect ratio, so the picture box tracks the real frame rather than the pane.
+       * That keeps the split divider over actual video instead of over letterboxing —
+       * a divider that drifts onto a black bar makes the comparison hard to read.
+       */}
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <div
+          ref={containerRef}
+          className="relative h-full max-w-full overflow-hidden rounded-md border border-border bg-black"
+          style={{ aspectRatio: media.aspectRatio }}
+          onMouseMove={(event) => {
+            if (mode === "split" && event.buttons === 1) onSplitDrag(event)
+          }}
+        >
+          {mode === "side" && hasAfter ? (
+            <div className="grid h-full grid-cols-2 gap-px">
+              <Layer label="Original">
+                <video
+                  ref={beforeRef}
+                  src={media.sourceUrl}
+                  className="size-full object-contain"
+                  onTimeUpdate={(event) => {
+                    onTimeChange(event.currentTarget.currentTime)
+                    syncAfter()
+                  }}
+                  onLoadedMetadata={(event) => onDurationChange(event.currentTarget.duration)}
+                  onEnded={() => setPlaying(false)}
+                />
+              </Layer>
+              <Layer label="Cleaned">
+                <video ref={afterRef} src={media.outputUrl ?? undefined} muted className="size-full object-contain" />
+              </Layer>
+            </div>
+          ) : (
+            <>
               <video
                 ref={beforeRef}
                 src={media.sourceUrl}
-                className="size-full object-contain"
+                className={cn(
+                  "absolute inset-0 size-full object-contain",
+                  mode === "after" && hasAfter && "invisible"
+                )}
                 onTimeUpdate={(event) => {
                   onTimeChange(event.currentTarget.currentTime)
                   syncAfter()
@@ -143,74 +173,54 @@ export function ComparePlayer({
                 onLoadedMetadata={(event) => onDurationChange(event.currentTarget.duration)}
                 onEnded={() => setPlaying(false)}
               />
-            </Layer>
-            <Layer label="Cleaned">
-              <video ref={afterRef} src={media.outputUrl ?? undefined} muted className="size-full object-contain" />
-            </Layer>
-          </div>
-        ) : (
-          <>
-            <video
-              ref={beforeRef}
-              src={media.sourceUrl}
-              className={cn(
-                "absolute inset-0 size-full object-contain",
-                mode === "after" && hasAfter && "invisible"
+
+              {hasAfter && (
+                <video
+                  ref={afterRef}
+                  src={media.outputUrl ?? undefined}
+                  muted
+                  className="absolute inset-0 size-full object-contain"
+                  style={
+                    mode === "split"
+                      ? { clipPath: `inset(0 0 0 ${split * 100}%)` }
+                      : mode === "after"
+                        ? undefined
+                        : { display: "none" }
+                  }
+                />
               )}
-              onTimeUpdate={(event) => {
-                onTimeChange(event.currentTarget.currentTime)
-                syncAfter()
-              }}
-              onLoadedMetadata={(event) => onDurationChange(event.currentTarget.duration)}
-              onEnded={() => setPlaying(false)}
-            />
 
-            {hasAfter && (
-              <video
-                ref={afterRef}
-                src={media.outputUrl ?? undefined}
-                muted
-                className="absolute inset-0 size-full object-contain"
-                style={
-                  mode === "split"
-                    ? { clipPath: `inset(0 0 0 ${split * 100}%)` }
-                    : mode === "after"
-                      ? undefined
-                      : { display: "none" }
-                }
-              />
-            )}
-
-            {mode === "split" && hasAfter && (
-              <>
-                <div
-                  className="absolute inset-y-0 z-10 w-px bg-primary"
-                  style={{ left: `${split * 100}%` }}
-                />
-                <div
-                  role="slider"
-                  aria-label="Comparison position"
-                  aria-valuenow={Math.round(split * 100)}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  tabIndex={0}
-                  className="absolute inset-y-0 z-10 w-6 -translate-x-1/2 cursor-ew-resize"
-                  style={{ left: `${split * 100}%` }}
-                  onMouseDown={onSplitDrag}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowLeft") setSplit((v) => Math.max(0, v - 0.02))
-                    if (event.key === "ArrowRight") setSplit((v) => Math.min(1, v + 0.02))
-                  }}
-                />
-                <Corner className="left-2">Original</Corner>
-                <Corner className="right-2">Cleaned</Corner>
-              </>
-            )}
-          </>
-        )}
+              {mode === "split" && hasAfter && (
+                <>
+                  <div
+                    className="absolute inset-y-0 z-10 w-px bg-primary"
+                    style={{ left: `${split * 100}%` }}
+                  />
+                  <div
+                    role="slider"
+                    aria-label="Comparison position"
+                    aria-valuenow={Math.round(split * 100)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    tabIndex={0}
+                    className="absolute inset-y-0 z-10 w-6 -translate-x-1/2 cursor-ew-resize"
+                    style={{ left: `${split * 100}%` }}
+                    onMouseDown={onSplitDrag}
+                    onKeyDown={(event) => {
+                      if (event.key === "ArrowLeft") setSplit((v) => Math.max(0, v - 0.02))
+                      if (event.key === "ArrowRight") setSplit((v) => Math.min(1, v + 0.02))
+                    }}
+                  />
+                  <Corner className="left-2">Original</Corner>
+                  <Corner className="right-2">Cleaned</Corner>
+                </>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <Button variant="ghost" size="icon" className="size-8" aria-label="Previous frame" onClick={() => step(-1)}>
           <SkipBack className="size-4" />
         </Button>
@@ -242,7 +252,7 @@ export function ComparePlayer({
       </div>
 
       {!hasAfter && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="shrink-0 text-[11px] text-muted-foreground">
           Showing the original. Run the removal to compare it against the cleaned version.
         </p>
       )}

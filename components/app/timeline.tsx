@@ -19,12 +19,14 @@ import { cn } from "@/lib/utils"
  * untouched are drawn distinctly instead of being folded into a clean-looking whole.
  */
 export function Timeline({
+  className,
   media,
   duration,
   currentTime,
   onSeek,
   result,
 }: {
+  className?: string
   media: ClipMedia
   duration: number
   currentTime: number
@@ -49,7 +51,12 @@ export function Timeline({
   const skippedFraction = totalFrames > 0 ? result!.framesLeftUntouched / totalFrames : 0
 
   return (
-    <div className="relative select-none rounded-md border border-border bg-surface">
+    <div
+      className={cn(
+        "relative select-none rounded-md border border-border bg-surface",
+        className
+      )}
+    >
       <div className="flex items-center justify-between px-3 py-1.5">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Timeline

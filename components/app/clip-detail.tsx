@@ -12,18 +12,23 @@ import { Timeline } from "@/components/app/timeline"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useClipMedia } from "@/hooks/use-desktop"
 import { formatBytes, formatDuration } from "@/lib/format"
 
 /**
- * The editing surface for one clip: player on top, timeline beneath it, then the
- * controls and status that apply to it.
+ * The editing surface for one clip, laid out as docked regions rather than one long
+ * scrolling column.
  *
- * Seeing the result matters more than reading a summary of it. A tool that changes
- * someone's footage and then reports "done" in words alone is asking to be trusted;
- * showing the before and after earns it instead.
+ * An editor's frame does not move. The player takes whatever height is left over, the
+ * timeline sits under it, the inspector below that scrolls within its own bounds, and
+ * the action bar is pinned — so Run is reachable at every window size and in every
+ * state. A single scrolling column looked fine until a 16:9 player claimed the whole
+ * viewport and pushed the only button that matters past the bottom edge.
+ *
+ * Every flexible region carries `min-h-0`. Flex items default to `min-height: auto`,
+ * which means "never shrink below your content" — a scroll container with that default
+ * grows to fit instead of scrolling, which is exactly how the action bar disappeared.
  */
 export function ClipDetail({
   job,
@@ -50,45 +55,55 @@ export function ClipDetail({
   )
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
-      <ScrollArea className="flex-1">
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 p-4">
-          <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h1 className="min-w-0 truncate text-[14px] font-semibold" title={job.inputPath}>
-              {job.fileName}
-            </h1>
-            {job.info && (
-              <p className="text-[11px] text-muted-foreground tabular">
-                {job.info.width}×{job.info.height} · {job.info.videoCodec} ·{" "}
-                {job.info.frameRate.toFixed(2)} fps · {formatDuration(job.info.durationSeconds)} ·{" "}
-                {formatBytes(job.info.sizeBytes)} ·{" "}
-                {job.info.hasAudio ? `audio ${job.info.audioCodec ?? ""}`.trim() : "no audio"}
-              </p>
-            )}
-          </header>
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="flex shrink-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 px-4 py-2.5">
+        <h1 className="min-w-0 truncate text-[14px] font-semibold" title={job.inputPath}>
+          {job.fileName}
+        </h1>
+        {job.info && (
+          <p className="text-[11px] text-muted-foreground tabular">
+            {job.info.width}×{job.info.height} · {job.info.videoCodec} ·{" "}
+            {job.info.frameRate.toFixed(2)} fps · {formatDuration(job.info.durationSeconds)} ·{" "}
+            {formatBytes(job.info.sizeBytes)} ·{" "}
+            {job.info.hasAudio ? `audio ${job.info.audioCodec ?? ""}`.trim() : "no audio"}
+          </p>
+        )}
+      </header>
 
-          {media ? (
-            <ComparePlayer
-              media={media}
-              frameRate={job.info?.frameRate ?? 30}
-              currentTime={currentTime}
-              onTimeChange={setCurrentTime}
-              onDurationChange={setDuration}
-            />
-          ) : (
-            <Skeleton className="w-full rounded-md" style={{ aspectRatio: 16 / 9 }} />
-          )}
+      {/* Stage — the player absorbs the slack, the timeline keeps its own height. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 pb-2">
+        {media ? (
+          <ComparePlayer
+            className="min-h-0 flex-1"
+            media={media}
+            frameRate={job.info?.frameRate ?? 30}
+            currentTime={currentTime}
+            onTimeChange={setCurrentTime}
+            onDurationChange={setDuration}
+          />
+        ) : (
+          <Skeleton className="min-h-0 flex-1 rounded-md" />
+        )}
 
-          {media && (
-            <Timeline
-              media={media}
-              duration={duration || (job.info?.durationSeconds ?? 0)}
-              currentTime={currentTime}
-              onSeek={setCurrentTime}
-              result={job.result}
-            />
-          )}
+        {media && (
+          <Timeline
+            className="shrink-0"
+            media={media}
+            duration={duration || (job.info?.durationSeconds ?? 0)}
+            currentTime={currentTime}
+            onSeek={setCurrentTime}
+            result={job.result}
+          />
+        )}
+      </div>
 
+      {/*
+       * Inspector. Sizes to its content and scrolls only once it would take more than
+       * its share of the window, so an expanded Advanced drawer can never crowd out the
+       * player or the action bar.
+       */}
+      <div className="max-h-[38%] shrink-0 overflow-y-auto overscroll-contain border-t border-border">
+        <div className="flex flex-col gap-2 px-4 py-3">
           {job.info && !job.info.calibratedResolution && (
             <Badge variant="secondary" className="w-fit gap-1.5 font-normal">
               <AlertTriangle className="size-3" />
@@ -128,9 +143,9 @@ export function ClipDetail({
 
           <AdvancedDrawer options={options} onChange={setOptions} disabled={busy} />
         </div>
-      </ScrollArea>
+      </div>
 
-      <footer className="flex items-center justify-between gap-3 border-t border-border bg-sidebar px-5 py-3">
+      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-sidebar px-4 py-2.5">
         <div className="min-w-0 text-[11px] text-muted-foreground">
           {job.result ? (
             <span className="truncate" title={job.result.outputPath}>
