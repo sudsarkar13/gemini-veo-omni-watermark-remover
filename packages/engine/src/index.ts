@@ -31,3 +31,4 @@ export {
   type IntegralImage,
   type Template,
 } from "./correlate.ts"
+export { verifyReversibility, type VerifyOptions, type VerifyResult } from "./verify.ts"
