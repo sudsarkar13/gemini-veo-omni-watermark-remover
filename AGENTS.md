@@ -59,6 +59,25 @@ The repository uses **gitmoji + Conventional Commits**:
 - Verify with `yarn explain peer-requirements` after any dependency change. All entries
   should be `✓`; unprovided *optional* peers are acceptable.
 
+## UI work
+
+[`docs/UI-SPEC.md`](docs/UI-SPEC.md) defines every screen, control, action, and state.
+**If a control is not in that document, do not build it** — update the spec first and
+justify its place. The spec exists specifically to stop the app accreting sliders one
+bug report at a time, which is the visible failure mode of every competing tool.
+
+Locked direction: dark-first pro media tool, two-pane queue + preview layout, simple by
+default with an Advanced drawer, pre-flight resource estimate plus live meters.
+
+## Dependencies must be current
+
+- **Use the latest stable version of every package.** No outdated versions, no
+  pre-release or beta versions.
+- An upgrade is only complete when `yarn explain peer-requirements` still reports zero
+  failures. If latest cannot be used, pin back to the newest version that can, and
+  record the package, the version, and the actual blocker in `docs/PLAN.md` §9.
+- Never resolve a version conflict by loosening or ignoring peer ranges.
+
 ## Engineering rules
 
 - **The engine is the product; the Electron app is a shell around it.** Build and test

@@ -2,6 +2,7 @@
 
 > **Status:** Planning — no engine code written yet.
 > **Last updated:** 2026-09-05
+> Companion document: [`UI-SPEC.md`](UI-SPEC.md) — the interface, its controls, and its states.
 > This document is the single focus point for the project. Update it as decisions land;
 > do not let it drift from the code.
 
@@ -22,6 +23,19 @@ Windows, and Ubuntu/Linux**. Free and open source, with a polished UI.
 - Signed, distributable installers for all three platforms.
 - An opt-in diagnostics and feedback loop that turns real-world failures into
   calibration data (see [§7](#7-diagnostics-telemetry--user-feedback)).
+
+### Local-first: why there are no file-size limits
+
+Browser-based competitors cap out around 100-200 MB because WebCodecs holds decoded
+frames inside a tab's memory budget and a refresh destroys the work. **We are a native
+application with direct filesystem access, so those ceilings do not apply.** Files of
+1 GB and beyond process fine; the real limits are disk space for the output and time.
+
+The cost is real, though: full decode -> per-frame detection -> re-encode is CPU-bound
+and memory-hungry, and a long 4K clip will saturate cores and hold significant RAM.
+The UI must set that expectation **before** a run rather than thirty minutes into one --
+pre-flight estimate plus live meters, specified in [`UI-SPEC.md`](UI-SPEC.md) SS6.
+No network access is required at any point in processing.
 
 ### Non-goals
 
@@ -233,6 +247,7 @@ interface WatermarkTrack {
 | Denoise | **onnxruntime-node + FDnCNN**, optional | Replaces prior art's NCNN/Vulkan dependency. |
 | Diagnostics | **Local structured JSONL** + Electron `crashReporter`; opt-in reporting | No third-party analytics SDK. A privacy tool cannot ship a background beacon. |
 | Report transport | **Prefilled GitHub issue** by default; opt-in direct endpoint | Zero infrastructure, user's own account, nothing held by us. |
+| Dependency currency | **Latest stable of everything**, verified against peer ranges | No outdated packages. Every upgrade must keep `yarn explain peer-requirements` at zero failures - see SS9 for what is currently pinned back and why. |
 | Packaging | **electron-builder** — dmg / NSIS / AppImage + deb | Standard three-target output. |
 
 ---
@@ -351,8 +366,9 @@ Both paths emit the same payload so triage stays uniform.
       progress reporting, per-platform binary resolution.
 - [ ] **Phase 3 — Electron main / preload / IPC.** Worker isolation so the UI never
       blocks on processing.
-- [ ] **Phase 4 — UI.** Batch queue, timeline showing detected tracks per frame,
-      before/after scrubber, manual region + alpha override panel.
+- [ ] **Phase 4 — UI.** Built to [`UI-SPEC.md`](UI-SPEC.md): two-pane queue + preview,
+      track timeline, Advanced drawer, pre-flight estimate and live resource meters.
+      *Nothing outside that spec gets built without updating it first.*
 - [ ] **Phase 5 — Diagnostics & feedback.** Report composer, review dialog, ROI-crop
       attachment, Settings > Diagnostics page, `PRIVACY.md`, GitHub-issue transport.
       *Tier 1 structured logging is built in Phase 1, not deferred to here* — the
@@ -372,6 +388,16 @@ Both paths emit the same payload so triage stays uniform.
   until there is real demand? (GitHub-only is the lower-risk start — no infrastructure,
   no retention obligations, no `PRIVACY.md` endpoint claims to keep accurate.)
 - Retention window for the direct endpoint, if we build it.
+
+### Dependency versions currently pinned back
+
+Policy is latest stable everywhere. Two packages cannot move yet, both blocked by real
+peer conflicts rather than caution. Re-check both when `eslint-config-next` updates:
+
+| Package | On | Latest | Blocker |
+| --- | --- | --- | --- |
+| `eslint` | 9.39.5 | 10.10.0 | `eslint-plugin-react@7.37.5`, pulled in by `eslint-config-next`, caps at `^9.7`. Combined range across 15 consumers resolves to `^9.7.0`. |
+| `typescript` | 5.9.3 | 7.0.2 | `typescript-eslint@8.69.0` requires `>=4.8.4 <6.1.0`. TypeScript 6 is beta-only, so 5.9.3 is the newest stable that satisfies it. |
 
 ### Calibration inputs needed
 
