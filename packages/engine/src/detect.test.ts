@@ -17,7 +17,7 @@ import {
   type Candidate,
 } from "./detect.ts"
 import { buildIntegral } from "./correlate.ts"
-import type { AlphaMap, Rect } from "./types.ts"
+import type { AlphaMap } from "./types.ts"
 
 /**
  * Deterministic pseudo-random texture over a gentle gradient.

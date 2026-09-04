@@ -1,0 +1,24 @@
+{
+  "name": "@gvowr/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Electron shell: window, IPC, and the job queue that drives the engine.",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js --watch",
+    "start": "electron .",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@gvowr/engine": "workspace:*",
+    "@gvowr/video": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  }
+}
