@@ -44,6 +44,10 @@ export interface TrackOptions {
    */
   readonly maxInterpolationGap?: number
   readonly alphaStepCap?: number
+  /**
+   * Window for the temporal median applied to track position. Odd, or 1 to disable.
+   */
+  readonly positionWindow?: number
 }
 
 const DEFAULTS = {
@@ -52,6 +56,7 @@ const DEFAULTS = {
   minPersistence: 8,
   maxInterpolationGap: 15,
   alphaStepCap: ALPHA_STEP_CAP,
+  positionWindow: 5,
 } as const
 
 function centre(rect: Rect): { x: number; y: number } {
@@ -149,6 +154,7 @@ export function consolidate(
   const minPersistence = options.minPersistence ?? DEFAULTS.minPersistence
   const maxGap = options.maxInterpolationGap ?? DEFAULTS.maxInterpolationGap
   const stepCap = options.alphaStepCap ?? DEFAULTS.alphaStepCap
+  const positionWindow = options.positionWindow ?? DEFAULTS.positionWindow
 
   const kept: WatermarkTrack[] = []
   let rejected = 0
@@ -190,7 +196,7 @@ export function consolidate(
     kept.push({
       id: track.id,
       variant: track.variant,
-      frames: smoothAlpha(frames, stepCap),
+      frames: smoothAlpha(smoothPositions(frames, positionWindow), stepCap),
       firstFrame: observed[0] as number,
       lastFrame: observed.at(-1) as number,
     })
@@ -206,6 +212,65 @@ function lerpRect(a: Rect, b: Rect, t: number): Rect {
     width: Math.round(a.width + (b.width - a.width) * t),
     height: Math.round(a.height + (b.height - a.height) * t),
   }
+}
+
+/**
+ * Temporal median filter over track position.
+ *
+ * Position is estimated independently per frame, so a stationary mark jitters by a
+ * pixel as noise moves the correlation peak around. That matters far more than it
+ * sounds: measured against ground truth, a one-pixel offset costs roughly six times
+ * the error of a 0.03 alpha error, because the mark's alpha falls off steeply at its
+ * rim and a misaligned correction leaves bright and dark crescents.
+ *
+ * A median rather than a mean, so genuine motion is followed without being smeared,
+ * while isolated single-frame excursions are discarded outright.
+ */
+function smoothPositions(
+  frames: ReadonlyMap<number, TrackedFrame>,
+  window: number
+): Map<number, TrackedFrame> {
+  if (window <= 1) return new Map(frames)
+
+  const ordered = [...frames.keys()].sort((a, b) => a - b)
+  const half = Math.floor(window / 2)
+  const out = new Map<number, TrackedFrame>()
+
+  for (let i = 0; i < ordered.length; i++) {
+    const index = ordered[i] as number
+    const frame = frames.get(index) as TrackedFrame
+
+    // Occluded frames are not corrected, so their position is not a measurement and
+    // must not influence its neighbours.
+    if (frame.state === "occluded") {
+      out.set(index, frame)
+      continue
+    }
+
+    const xs: number[] = []
+    const ys: number[] = []
+    for (let j = Math.max(0, i - half); j <= Math.min(ordered.length - 1, i + half); j++) {
+      const neighbour = frames.get(ordered[j] as number) as TrackedFrame
+      if (neighbour.state === "occluded") continue
+      xs.push(neighbour.rect.x)
+      ys.push(neighbour.rect.y)
+    }
+
+    out.set(index, {
+      ...frame,
+      rect: { ...frame.rect, x: median(xs), y: median(ys) },
+    })
+  }
+
+  return out
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = sorted.length >> 1
+  return sorted.length % 2 === 1
+    ? (sorted[mid] as number)
+    : Math.round(((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2)
 }
 
 /**

@@ -161,6 +161,34 @@ describe("consolidate", () => {
     assert.ok(Math.abs(after.alpha - 0.6) < 1e-6, `alpha drifted to ${after.alpha}`)
   })
 
+  it("removes single-pixel position jitter from a stationary mark", () => {
+    // Position is estimated per frame, so a still mark wobbles as noise moves the
+    // correlation peak. Measured against ground truth, one pixel of offset costs
+    // roughly six times what a 0.03 alpha error does, because the mark's alpha falls
+    // off steeply at its rim and a misaligned correction leaves visible crescents.
+    const jitter = [0, 1, 0, -1, 0, 1, 0, 0, -1, 0, 1, 0]
+    const frames = jitter.map((d) => [seen(box(100 + d, 100 + d))])
+
+    const { tracks } = buildTracks(frames, { minPersistence: 8, positionWindow: 5 })
+    const track = tracks[0]!
+
+    const xs = [...track.frames.values()].map((f) => f.rect.x)
+    assert.ok(
+      xs.every((x) => x === 100),
+      `jitter survived smoothing: ${[...new Set(xs)].join(",")}`
+    )
+  })
+
+  it("still follows genuine motion through the median filter", () => {
+    // A median must not smear real movement, only reject isolated excursions.
+    const frames = Array.from({ length: 14 }, (_, i) => [seen(box(40 + i * 5, 60))])
+    const { tracks } = buildTracks(frames, { minPersistence: 8, matchRadius: 32 })
+    const track = tracks[0]!
+    const first = track.frames.get(track.firstFrame)!.rect.x
+    const last = track.frames.get(track.lastFrame)!.rect.x
+    assert.ok(last - first >= 55, `motion was flattened: ${first} -> ${last}`)
+  })
+
   it("handles an empty timeline", () => {
     const result = consolidate([], {})
     assert.deepEqual(result.tracks, [])

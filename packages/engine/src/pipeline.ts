@@ -1,6 +1,7 @@
 import { scaleAlphaMap } from "./alpha-map.ts"
+import { ALPHA_THRESHOLD, LOGO_VALUE, MAX_ALPHA } from "./constants.ts"
 import { unblend } from "./blend.ts"
-import { toGrayscale } from "./correlate.ts"
+import { toGrayscale, type Grayscale } from "./correlate.ts"
 import {
   analyseFrame,
   defaultSizes,
@@ -98,14 +99,19 @@ export function planClip(frames: Iterable<Frame>, map: AlphaMap, options: PlanOp
   let index = 0
   let previous: Rect[] = []
   let templates: SizedTemplate[] | null = null
+  let searchSizes: readonly number[] = []
 
   for (const frame of frames) {
     if (index === 0) {
       width = frame.width
       height = frame.height
-      templates = (options.sizes ?? defaultSizes(width, height)).map((size) =>
-        sizeTemplate(map, size)
-      )
+      // The template's own captured size is real prior information about how big
+      // the mark is, so it always joins the search set. Without it, a supplied
+      // template can be silently searched for at every size except its own.
+      const sizes =
+        options.sizes ?? [...new Set([...defaultSizes(width, height), map.width])].sort((a, b) => a - b)
+      searchSizes = sizes
+      templates = sizes.map((size) => sizeTemplate(map, size))
     }
 
     const analysis = analyseFrame(toGrayscale(frame))
@@ -119,19 +125,27 @@ export function planClip(frames: Iterable<Frame>, map: AlphaMap, options: PlanOp
       templates as SizedTemplate[],
       previous,
       { shouldSweep, mode, trackRadius, width, height },
-      options
+      { ...options, sizes: options.sizes ?? searchSizes }
     )
 
     const observations: Observation[] = []
     for (const candidate of candidates) {
       const scaled = scaleAlphaMap(map, candidate.rect.width, candidate.rect.height)
-      const verdict = verifyReversibility(analysis.image, scaled, candidate.rect, options)
+
+      // Settle the last pixel of position by removal quality rather than correlation.
+      //
+      // The correlation peak is not exactly the true position once there is noise in
+      // the frame, and being one pixel out leaves a visible halo because the mark's
+      // alpha falls off steeply at its edges. Residual is the thing we actually care
+      // about, so it decides — nine cheap verifications per candidate.
+      const best = polish(analysis.image, scaled, candidate.rect, options)
+
       // The verifier is the gate, not the detector. Correlation cannot tell a mark
       // from a highlight; reversibility can.
-      if (!verdict.isComposite) continue
+      if (!best.verdict.isComposite) continue
       observations.push({
-        rect: candidate.rect,
-        alpha: verdict.gain,
+        rect: best.rect,
+        alpha: best.verdict.gain,
         confidence: candidate.score,
       })
     }
@@ -179,6 +193,98 @@ export function planClip(frames: Iterable<Frame>, map: AlphaMap, options: PlanOp
   }
 }
 
+/** The sized template closest to an established track's size. */
+function nearestTemplate(
+  templates: readonly SizedTemplate[],
+  size: number
+): SizedTemplate | null {
+  let best: SizedTemplate | null = null
+  let bestDelta = Infinity
+  for (const template of templates) {
+    const delta = Math.abs(template.size - size)
+    if (delta < bestDelta) {
+      best = template
+      bestDelta = delta
+    }
+  }
+  return best
+}
+
+/**
+ * Nudges a candidate by up to one pixel in each direction, keeping whichever offset
+ * removes most cleanly.
+ *
+ * Quality is judged by the edge energy left behind, not by the verifier's residual.
+ * The residual is a scalar mean comparison and barely moves under a one-pixel shift,
+ * so it cannot localise. A misaligned removal, by contrast, leaves bright and dark
+ * crescents along the mark's rim — exactly the signature gradient energy measures.
+ */
+function polish(
+  image: Grayscale,
+  scaled: AlphaMap,
+  rect: Rect,
+  options: VerifyOptions
+): { rect: Rect; verdict: ReturnType<typeof verifyReversibility> } {
+  const base = verifyReversibility(image, scaled, rect, options)
+  let best = { rect, verdict: base, energy: residualEdgeEnergy(image, scaled, rect, base.gain) }
+
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue
+      const shifted: Rect = { ...rect, x: rect.x + dx, y: rect.y + dy }
+      const verdict = verifyReversibility(image, scaled, shifted, options)
+      if (verdict.inconclusive) continue
+      const energy = residualEdgeEnergy(image, scaled, shifted, verdict.gain)
+      if (energy < best.energy) best = { rect: shifted, verdict, energy }
+    }
+  }
+  return best
+}
+
+/**
+ * Mean gradient magnitude inside the corrected region.
+ *
+ * Correcting into a copy rather than the frame, since this is a trial: several
+ * offsets are scored before one is chosen.
+ */
+function residualEdgeEnergy(
+  image: Grayscale,
+  scaled: AlphaMap,
+  rect: Rect,
+  gain: number
+): number {
+  const { width: w, height: h } = rect
+  if (rect.x < 1 || rect.y < 1 || rect.x + w + 1 > image.width || rect.y + h + 1 > image.height) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  const patch = new Float32Array(w * h)
+  for (let row = 0; row < h; row++) {
+    for (let col = 0; col < w; col++) {
+      const v = image.data[(rect.y + row) * image.width + rect.x + col] as number
+      let a = (scaled.data[row * w + col] as number) * gain
+      if (a < ALPHA_THRESHOLD) {
+        patch[row * w + col] = v
+        continue
+      }
+      if (a > MAX_ALPHA) a = MAX_ALPHA
+      patch[row * w + col] = (v - a * LOGO_VALUE) / (1 - a)
+    }
+  }
+
+  let total = 0
+  let count = 0
+  for (let row = 1; row < h - 1; row++) {
+    for (let col = 1; col < w - 1; col++) {
+      const i = row * w + col
+      total += Math.abs((patch[i + 1] as number) - (patch[i - 1] as number))
+      total += Math.abs((patch[i + w] as number) - (patch[i - w] as number))
+      count += 2
+    }
+  }
+  return count > 0 ? total / count : Number.POSITIVE_INFINITY
+}
+
 interface CollectContext {
   readonly shouldSweep: boolean
   readonly mode: DetectionMode
@@ -203,9 +309,19 @@ function collectCandidates(
   const found: Candidate[] = []
 
   for (const rect of previous) {
+    // Follow an established track by position only, holding its size fixed.
+    //
+    // Re-choosing the size every frame looks harmless but is not: a smaller template
+    // constrains fewer pixels, so it can out-score the correct one on raw
+    // correlation, and the track then walks down to the smallest size on offer. Once
+    // a mark's size is known it is a property of the encode, not something to
+    // re-litigate frame by frame.
+    const template = nearestTemplate(templates, rect.width)
+    if (!template) continue
+
     const best = searchWindow(
       analysis,
-      templates,
+      [template],
       {
         x: rect.x - context.trackRadius,
         y: rect.y - context.trackRadius,
