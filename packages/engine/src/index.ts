@@ -61,3 +61,13 @@ export {
   type Observation,
   type TrackOptions,
 } from "./track.ts"
+export {
+  planClip,
+  renderFrame,
+  type ClipDiagnostics,
+  type ClipPlan,
+  type DetectionMode,
+  type FrameReport,
+  type PlanOptions,
+  type RenderReport,
+} from "./pipeline.ts"
