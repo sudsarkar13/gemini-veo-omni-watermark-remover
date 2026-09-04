@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import {
+  CALIBRATED_PROFILES,
   VEO_720P_COMPACT,
   VEO_720P_STANDARD,
   clampRect,
@@ -42,7 +43,7 @@ describe("calibrated profiles", () => {
   })
 
   it("does not offer profiles measured at other resolutions", () => {
-    assert.equal(profilesFor(1280, 720).length, 2)
+    assert.equal(profilesFor(1280, 720).length, 3)
     assert.equal(profilesFor(1920, 1080).length, 0)
   })
 })
@@ -92,8 +93,10 @@ describe("cornerCandidates", () => {
   it("returns the measured profiles without a redundant generic guess at 720p", () => {
     const candidates = cornerCandidates(1280, 720)
     // The generic rect equals the standard profile here, so it must be deduplicated.
-    assert.equal(candidates.length, 2)
+    assert.equal(candidates.length, CALIBRATED_PROFILES.length)
     assert.ok(candidates.every((c) => c.calibrated))
+    // The placement we measured ourselves is offered first.
+    assert.equal(candidates[0]?.profile?.id, "veo-720p-inset")
   })
 
   it("falls back to a single uncalibrated guess at unmeasured resolutions", () => {

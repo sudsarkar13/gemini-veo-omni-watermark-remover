@@ -7,6 +7,7 @@ export { alphaMapFromTemplate, peakAlpha, scaleAlphaMap, withGain } from "./alph
 export {
   CALIBRATED_PROFILES,
   VEO_720P_COMPACT,
+  VEO_720P_INSET,
   VEO_720P_STANDARD,
   clampRect,
   cornerCandidates,

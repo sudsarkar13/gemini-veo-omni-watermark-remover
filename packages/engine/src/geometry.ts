@@ -28,8 +28,13 @@ export interface CornerProfile {
 }
 
 /**
- * Profiles measured from real Veo output at 720p. The two variants correlate with
- * the encoder bitrate tier, which is why both exist at the same resolution.
+ * Placements observed in real Veo output at 720p. The variants correlate with the
+ * encoder bitrate tier, which is why several exist at one resolution.
+ *
+ * `VEO_720P_INSET` was measured here, from a clip supplied for calibration: the mark's
+ * ink occupies exactly x 1136..1183, y 576..623, giving a 96 px margin on both edges.
+ * The other two are the placements documented by the upstream MIT projects
+ * (docs/PLAN.md §10) and have not been re-measured against our own captures.
  */
 export const VEO_720P_STANDARD: CornerProfile = {
   id: "veo-720p-1",
@@ -51,7 +56,23 @@ export const VEO_720P_COMPACT: CornerProfile = {
   frameHeight: 720,
 }
 
+/**
+ * Measured from a 1280x720 Veo clip by temporal-minimum isolation of the static
+ * overlay — the same capture that produced `assets/veo-diamond-48.ppm`. Listed first
+ * because it is the one placement we have verified ourselves end to end.
+ */
+export const VEO_720P_INSET: CornerProfile = {
+  id: "veo-720p-inset",
+  label: "Veo 720p inset (96 px margin)",
+  size: 48,
+  marginRight: 96,
+  marginBottom: 96,
+  frameWidth: 1280,
+  frameHeight: 720,
+}
+
 export const CALIBRATED_PROFILES: readonly CornerProfile[] = [
+  VEO_720P_INSET,
   VEO_720P_STANDARD,
   VEO_720P_COMPACT,
 ]
