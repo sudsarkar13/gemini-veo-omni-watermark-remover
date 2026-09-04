@@ -70,8 +70,14 @@ export function ClipDetail({
         )}
       </header>
 
-      {/* Stage — the player absorbs the slack, the timeline keeps its own height. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 pb-2">
+      {/*
+       * Stage — the player absorbs the slack, the timeline keeps its own height.
+       *
+       * The floor matters at the minimum window size with the drawer open: without it
+       * the inspector's share squeezes the picture down to a postage stamp, and a
+       * video tool whose video has been squeezed out is not one.
+       */}
+      <div className="flex min-h-[200px] flex-1 flex-col gap-2 px-4 pb-2">
         {media ? (
           <ComparePlayer
             className="min-h-0 flex-1"
@@ -98,11 +104,12 @@ export function ClipDetail({
       </div>
 
       {/*
-       * Inspector. Sizes to its content and scrolls only once it would take more than
-       * its share of the window, so an expanded Advanced drawer can never crowd out the
-       * player or the action bar.
+       * Inspector. Sizes to its content and scrolls once it would take more than its
+       * share of the window — and yields further to the stage's floor before that,
+       * since it can always scroll and the picture cannot. Either way the action bar
+       * below it stays put.
        */}
-      <div className="max-h-[38%] shrink-0 overflow-y-auto overscroll-contain border-t border-border">
+      <div className="max-h-[30%] min-h-0 overflow-y-auto overscroll-contain border-t border-border">
         <div className="flex flex-col gap-2 px-4 py-3">
           {job.info && !job.info.calibratedResolution && (
             <Badge variant="secondary" className="w-fit gap-1.5 font-normal">

@@ -112,6 +112,28 @@ export function ComparePlayer({
     [frameRate, onTimeChange, syncAfter]
   )
 
+  /**
+   * Both players stay mounted in every mode and are only re-positioned.
+   *
+   * Rendering a different tree per mode remounts the video elements, which reloads
+   * them and drops the playhead back to zero — switching from split to side-by-side
+   * would throw away the exact frame you were inspecting. Side-by-side gives each
+   * element half the box and lets `object-contain` fit the picture inside it, so the
+   * geometry changes without the elements ever going away.
+   */
+  const geometry: { before: React.CSSProperties; after: React.CSSProperties } =
+    mode === "side" && hasAfter
+      ? { before: { left: 0, width: "50%" }, after: { left: "50%", width: "50%" } }
+      : {
+          before: { left: 0, width: "100%" },
+          after:
+            mode === "split"
+              ? { left: 0, width: "100%", clipPath: `inset(0 0 0 ${split * 100}%)` }
+              : mode === "after"
+                ? { left: 0, width: "100%" }
+                : { display: "none" },
+        }
+
   const onSplitDrag = useCallback((event: React.MouseEvent | React.TouchEvent) => {
     const container = containerRef.current
     if (!container) return
@@ -138,83 +160,62 @@ export function ComparePlayer({
             if (mode === "split" && event.buttons === 1) onSplitDrag(event)
           }}
         >
-          {mode === "side" && hasAfter ? (
-            <div className="grid h-full grid-cols-2 gap-px">
-              <Layer label="Original">
-                <video
-                  ref={beforeRef}
-                  src={media.sourceUrl}
-                  className="size-full object-contain"
-                  onTimeUpdate={(event) => {
-                    onTimeChange(event.currentTarget.currentTime)
-                    syncAfter()
-                  }}
-                  onLoadedMetadata={(event) => onDurationChange(event.currentTarget.duration)}
-                  onEnded={() => setPlaying(false)}
-                />
-              </Layer>
-              <Layer label="Cleaned">
-                <video ref={afterRef} src={media.outputUrl ?? undefined} muted className="size-full object-contain" />
-              </Layer>
-            </div>
-          ) : (
+            <video
+            ref={beforeRef}
+            src={media.sourceUrl}
+            className={cn(
+              "absolute inset-y-0 object-contain",
+              mode === "after" && hasAfter && "invisible"
+            )}
+            style={geometry.before}
+            onTimeUpdate={(event) => {
+              onTimeChange(event.currentTarget.currentTime)
+              syncAfter()
+            }}
+            onLoadedMetadata={(event) => {
+              onDurationChange(event.currentTarget.duration)
+              // A finished run swaps in new media, which reloads the element and drops
+              // the playhead to zero. Restoring it keeps the frame under inspection
+              // under inspection.
+              if (currentTime > 0) event.currentTarget.currentTime = currentTime
+            }}
+            onEnded={() => setPlaying(false)}
+          />
+
+          {hasAfter && (
+            <video
+              ref={afterRef}
+              src={media.outputUrl ?? undefined}
+              muted
+              className="absolute inset-y-0 object-contain"
+              style={geometry.after}
+            />
+          )}
+
+          {mode === "split" && hasAfter && (
+            <div
+              role="slider"
+              aria-label="Comparison position"
+              aria-valuenow={Math.round(split * 100)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              tabIndex={0}
+              className="absolute inset-y-0 z-10 w-6 -translate-x-1/2 cursor-ew-resize border-l border-primary"
+              style={{ left: `${split * 100}%` }}
+              onMouseDown={onSplitDrag}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft") setSplit((v) => Math.max(0, v - 0.02))
+                if (event.key === "ArrowRight") setSplit((v) => Math.min(1, v + 0.02))
+              }}
+            />
+          )}
+
+          {hasAfter && (mode === "split" || mode === "side") && (
             <>
-              <video
-                ref={beforeRef}
-                src={media.sourceUrl}
-                className={cn(
-                  "absolute inset-0 size-full object-contain",
-                  mode === "after" && hasAfter && "invisible"
-                )}
-                onTimeUpdate={(event) => {
-                  onTimeChange(event.currentTarget.currentTime)
-                  syncAfter()
-                }}
-                onLoadedMetadata={(event) => onDurationChange(event.currentTarget.duration)}
-                onEnded={() => setPlaying(false)}
-              />
-
-              {hasAfter && (
-                <video
-                  ref={afterRef}
-                  src={media.outputUrl ?? undefined}
-                  muted
-                  className="absolute inset-0 size-full object-contain"
-                  style={
-                    mode === "split"
-                      ? { clipPath: `inset(0 0 0 ${split * 100}%)` }
-                      : mode === "after"
-                        ? undefined
-                        : { display: "none" }
-                  }
-                />
-              )}
-
-              {mode === "split" && hasAfter && (
-                <>
-                  <div
-                    className="absolute inset-y-0 z-10 w-px bg-primary"
-                    style={{ left: `${split * 100}%` }}
-                  />
-                  <div
-                    role="slider"
-                    aria-label="Comparison position"
-                    aria-valuenow={Math.round(split * 100)}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    tabIndex={0}
-                    className="absolute inset-y-0 z-10 w-6 -translate-x-1/2 cursor-ew-resize"
-                    style={{ left: `${split * 100}%` }}
-                    onMouseDown={onSplitDrag}
-                    onKeyDown={(event) => {
-                      if (event.key === "ArrowLeft") setSplit((v) => Math.max(0, v - 0.02))
-                      if (event.key === "ArrowRight") setSplit((v) => Math.min(1, v + 0.02))
-                    }}
-                  />
-                  <Corner className="left-2">Original</Corner>
-                  <Corner className="right-2">Cleaned</Corner>
-                </>
-              )}
+              <Corner className="left-2">Original</Corner>
+              <Corner className={mode === "side" ? "left-[calc(50%+0.5rem)]" : "right-2"}>
+                Cleaned
+              </Corner>
             </>
           )}
         </div>
@@ -256,15 +257,6 @@ export function ComparePlayer({
           Showing the original. Run the removal to compare it against the cleaned version.
         </p>
       )}
-    </div>
-  )
-}
-
-function Layer({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="relative size-full bg-black">
-      {children}
-      <Corner className="left-2">{label}</Corner>
     </div>
   )
 }
