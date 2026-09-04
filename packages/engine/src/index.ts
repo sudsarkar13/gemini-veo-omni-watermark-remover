@@ -17,3 +17,17 @@ export {
   type CornerCandidate,
   type CornerProfile,
 } from "./geometry.ts"
+export {
+  buildIntegral,
+  makeTemplate,
+  patchSum,
+  patchSumSquares,
+  referenceKernel,
+  sobelMagnitude,
+  templateFromAlphaMap,
+  toGrayscale,
+  type CorrelationKernel,
+  type Grayscale,
+  type IntegralImage,
+  type Template,
+} from "./correlate.ts"
