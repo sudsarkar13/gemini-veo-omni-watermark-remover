@@ -1,4 +1,4 @@
-import { ALPHA_THRESHOLD, LOGO_VALUE, MAX_ALPHA } from "./constants.ts"
+import { ALPHA_THRESHOLD, LOGO_VALUE, MAX_ALPHA, MIN_RING_SPREAD } from "./constants.ts"
 import type { Grayscale } from "./correlate.ts"
 import { scaleAlphaMap } from "./alpha-map.ts"
 import type { AlphaMap, Rect } from "./types.ts"
@@ -30,7 +30,21 @@ import type { AlphaMap, Rect } from "./types.ts"
  *
  * The search is a bisection, because the residual is monotonic in gain: more gain
  * always subtracts more white. Prior art uses this loop to *tune* removal strength at
- * a known location; here it also decides whether there is anything to remove at all.
+ * a known location; here it also decides whether there is anything to remove at all —
+ * and that difference is what makes bracketing mandatory.
+ *
+ * A composite has a root: some intensity drives the residual through zero. Content
+ * that merely resembles the mark does not — the residual stays positive across the
+ * whole range, and bisection simply walks to the ceiling. Reporting that endpoint as
+ * "the intensity that worked" is how a bright patch of ordinary texture gets a diamond
+ * subtracted out of it, leaving a black hole where content used to be. So the ends are
+ * evaluated first and a candidate whose residual does not change sign is rejected
+ * outright, no matter how small the leftover happens to look against a busy ring.
+ *
+ * Both tests are scored against the ring's own spread, floored at the encoder's noise
+ * level (`MIN_RING_SPREAD`). Against black sky the true spread is a fraction of a
+ * level, and without the floor a correction accurate to under one 8-bit level reads as
+ * a multi-sigma outlier — the mark survives and the run still reports success.
  *
  * Everything runs on luminance rather than per channel. Unblending is affine per
  * channel and luma is a linear combination whose weights sum to one, so
@@ -49,13 +63,12 @@ export interface VerifyOptions {
   readonly ringWidth?: number
   /**
    * How close the corrected patch must sit to the background, in units of the ring's
-   * own standard deviation. Scale-free, so it behaves the same on flat sky and on
-   * busy foliage.
+   * spread. Scale-free, so it behaves the same on flat sky and on busy foliage.
    */
   readonly acceptZScore?: number
   /**
    * How much brighter than the background the patch must be *before* correction, in
-   * ring standard deviations. Without this floor, "correct nothing" passes the
+   * units of the ring's spread. Without this floor, "correct nothing" passes the
    * consistency test on any ordinary patch of background.
    */
   readonly minLiftZ?: number
@@ -66,11 +79,11 @@ export interface VerifyResult {
   readonly isComposite: boolean
   /** The intensity that did it, or the best attempt if none did. */
   readonly gain: number
-  /** Signed distance from the background mean, in ring standard deviations. */
+  /** Signed distance from the background mean, in units of the ring's spread. */
   readonly residualZ: number
   /**
-   * How far above the background the patch sat before any correction, in ring
-   * standard deviations. Near zero means there was nothing there to remove;
+   * How far above the background the patch sat before any correction, in units of
+   * the ring's spread. Near zero means there was nothing there to remove;
    * negative means the region is darker than its surroundings.
    */
   readonly liftZ: number
@@ -78,6 +91,13 @@ export interface VerifyResult {
   readonly ringStd: number
   /** Number of ring pixels sampled. Low counts make the verdict unreliable. */
   readonly ringSamples: number
+  /**
+   * Whether some intensity in range drove the residual through zero.
+   *
+   * False means the search never found a solution and `gain` is only the least-bad
+   * endpoint — the candidate is content, not a composite.
+   */
+  readonly bracketed: boolean
   /** Set when the region could not be judged, e.g. too few ring pixels. */
   readonly inconclusive: boolean
 }
@@ -113,7 +133,11 @@ export function verifyReversibility(
 
   // Without a usable background there is nothing to be consistent *with*. Say so
   // rather than guessing — a fabricated verdict here becomes a false detection.
-  if (ring.count < 16 || ring.std < 1e-6) {
+  //
+  // A ring with no variation at all is not one of those cases: with the spread
+  // floored at the encoder's noise, a uniform background is the *easiest* thing to
+  // judge a correction against, not the hardest.
+  if (ring.count < 16) {
     return {
       isComposite: false,
       gain: minGain,
@@ -122,18 +146,46 @@ export function verifyReversibility(
       ringMean: ring.mean,
       ringStd: ring.std,
       ringSamples: ring.count,
+      bracketed: false,
       inconclusive: true,
     }
   }
 
+  // The background is never known more precisely than the codec encodes it, so its
+  // apparent spread is floored before anything is scored against it.
+  const spread = Math.max(ring.std, MIN_RING_SPREAD)
+
   // How much the mark lifted this region above its surroundings. Measured with the
   // template's own weighting so it reflects the mark's footprint, not the whole rect.
-  const liftZ = (weightedMean(image, alpha, rect) - ring.mean) / ring.std
+  const liftZ = (weightedMean(image, alpha, rect) - ring.mean) / spread
 
-  // Residual decreases monotonically as gain rises, so plain bisection converges.
+  // The residual falls monotonically as gain rises, so the ends decide whether a
+  // solution exists at all. Only a sign change means one does.
+  const residualAtMin = correctedMean(image, alpha, rect, minGain) - ring.mean
+  const residualAtMax = correctedMean(image, alpha, rect, maxGain) - ring.mean
+  const bracketed = residualAtMin > 0 && residualAtMax < 0
+
+  if (!bracketed) {
+    const endpoint =
+      Math.abs(residualAtMin) <= Math.abs(residualAtMax)
+        ? { gain: minGain, residual: residualAtMin }
+        : { gain: maxGain, residual: residualAtMax }
+    return {
+      isComposite: false,
+      gain: endpoint.gain,
+      residualZ: endpoint.residual / spread,
+      liftZ,
+      ringMean: ring.mean,
+      ringStd: ring.std,
+      ringSamples: ring.count,
+      bracketed: false,
+      inconclusive: false,
+    }
+  }
+
   let lo = minGain
   let hi = maxGain
-  let best = { gain: minGain, residual: Number.POSITIVE_INFINITY }
+  let best = { gain: minGain, residual: residualAtMin }
 
   for (let i = 0; i < rounds; i++) {
     const mid = (lo + hi) / 2
@@ -146,10 +198,10 @@ export function verifyReversibility(
     else hi = mid
   }
 
-  const residualZ = best.residual / ring.std
+  const residualZ = best.residual / spread
   return {
-    // Both conditions: the mark actually brightened this region, and some intensity
-    // put it back in line with its neighbourhood.
+    // Three conditions: a solution exists, the mark actually brightened this region,
+    // and that solution puts it back in line with its neighbourhood.
     isComposite: liftZ >= minLiftZ && Math.abs(residualZ) <= acceptZScore,
     gain: best.gain,
     residualZ,
@@ -157,6 +209,7 @@ export function verifyReversibility(
     ringMean: ring.mean,
     ringStd: ring.std,
     ringSamples: ring.count,
+    bracketed: true,
     inconclusive: false,
   }
 }

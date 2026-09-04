@@ -58,6 +58,52 @@ describe("verifyReversibility", () => {
     )
   })
 
+  it("accepts a near-exact correction against a background flatter than codec noise", () => {
+    // Black sky: the ring's true standard deviation is a fraction of a level, so a
+    // correction accurate to well under one 8-bit level scores as a wild outlier
+    // unless the spread is floored. This is the case that left the mark on screen
+    // while the run reported success.
+    const template = diamond(24, 0.31)
+    const image: Grayscale = {
+      width: 128,
+      height: 128,
+      data: new Float32Array(128 * 128).fill(1),
+    }
+    stamp(image, template, RECT, 1)
+
+    const result = verifyReversibility(image, template, RECT)
+
+    assert.ok(result.ringStd < 1, `expected a near-flat ring, got ${result.ringStd}`)
+    assert.equal(result.isComposite, true, `residualZ was ${result.residualZ}`)
+    assert.ok(Math.abs(result.gain - 1) < 0.15, `recovered gain ${result.gain}`)
+  })
+
+  it("rejects a bright patch whose residual never changes sign", () => {
+    // Content bright enough that no intensity in range darkens it to its
+    // surroundings. Bisection walks to the ceiling; the endpoint is not a solution,
+    // and treating it as one subtracts a diamond-shaped hole out of real footage.
+    const template = diamond(24, 0.31)
+    const image = background(128, 128)
+    for (let row = 0; row < RECT.height; row++) {
+      for (let col = 0; col < RECT.width; col++) {
+        image.data[(RECT.y + row) * image.width + RECT.x + col] = 250
+      }
+    }
+
+    const result = verifyReversibility(image, template, RECT)
+
+    assert.equal(result.bracketed, false)
+    assert.equal(result.isComposite, false)
+  })
+
+  it("reports a bracketed root whenever it accepts", () => {
+    const template = diamond(24, 0.8)
+    const image = background(128, 128)
+    stamp(image, template, RECT, 0.75)
+
+    assert.equal(verifyReversibility(image, template, RECT).bracketed, true)
+  })
+
   it("recovers a range of intensities", () => {
     const template = diamond(24, 0.8)
     for (const trueGain of [0.3, 0.5, 0.9, 1.2]) {
@@ -101,13 +147,15 @@ describe("verifyReversibility", () => {
     assert.ok(Math.abs(result.liftZ) < 0.75, `unexpected lift ${result.liftZ}`)
   })
 
-  it("reports inconclusive rather than guessing when the ring is featureless", () => {
-    // A perfectly uniform surround has zero variance, so "consistent with the
-    // background" has no scale. Fabricating a verdict here creates false detections.
+  it("rejects, rather than accepts, an unmarked region on a featureless surround", () => {
+    // A uniform surround used to be called unjudgeable. With the spread floored at
+    // the encoder's noise it is judgeable, and the answer is a clear no: nothing here
+    // is brighter than its background, so there is nothing to remove.
     const flat: Grayscale = { width: 64, height: 64, data: new Float32Array(64 * 64).fill(100) }
     const result = verifyReversibility(flat, diamond(16, 0.8), { x: 24, y: 24, width: 16, height: 16 })
-    assert.equal(result.inconclusive, true)
     assert.equal(result.isComposite, false)
+    assert.equal(result.inconclusive, false)
+    assert.ok(result.liftZ < 0.75, `nothing was there, yet lift read ${result.liftZ}`)
   })
 
   it("reports inconclusive when the candidate leaves too little ring to sample", () => {

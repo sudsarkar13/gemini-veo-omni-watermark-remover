@@ -31,3 +31,19 @@ export const DEFAULT_GAIN = 0.6
  * rather than displayed.
  */
 export const ALPHA_STEP_CAP = 0.05
+
+/**
+ * Floor on the background spread used to judge a correction, in 8-bit levels.
+ *
+ * The verifier scores a correction against the variation of the ring around it, which
+ * keeps it scale-free across flat sky and busy foliage alike. That breaks down when
+ * the surroundings are flatter than the codec's own noise: against black sky the ring
+ * measures a standard deviation of ~0.5, and a correction accurate to under one level
+ * scores as a three-sigma outlier and is thrown away. The mark stays on screen while
+ * the run reports success.
+ *
+ * A background cannot be known more precisely than the encoder represents it, so the
+ * ring's apparent spread is floored at the quantisation noise. This is a statement
+ * about measurement uncertainty, not a tolerance to be widened when something fails.
+ */
+export const MIN_RING_SPREAD = 2
