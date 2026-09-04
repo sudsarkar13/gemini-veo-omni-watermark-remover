@@ -9,6 +9,7 @@ import {
   searchWindow,
   sizeTemplate,
   sweepFrame,
+  DEFAULT_DISCOVERY_THRESHOLD,
   type Candidate,
   type SearchOptions,
   type SizedTemplate,
@@ -45,6 +46,11 @@ export interface PlanOptions extends SearchOptions, TrackOptions, VerifyOptions 
    * auto:   sweep, but seed from the corner priors.
    */
   readonly mode?: DetectionMode
+  /**
+   * Fused score a sweep candidate needs before it may start a new track. Defaults to
+   * `DEFAULT_DISCOVERY_THRESHOLD`; lower it only with a fixture that justifies it.
+   */
+  readonly discoveryThreshold?: number
 }
 
 export interface FrameReport {
@@ -101,6 +107,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
   const mode = options.mode ?? "auto"
   const sweepInterval = options.sweepInterval ?? DEFAULT_SWEEP_INTERVAL
   const trackRadius = options.trackRadius ?? DEFAULT_TRACK_RADIUS
+  const discoveryThreshold = options.discoveryThreshold ?? DEFAULT_DISCOVERY_THRESHOLD
 
   const started = Date.now()
   const perFrame: Observation[][] = []
@@ -137,7 +144,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
       map,
       templates as SizedTemplate[],
       previous,
-      { shouldSweep, mode, trackRadius, width, height },
+      { shouldSweep, mode, trackRadius, width, height, discoveryThreshold },
       { ...options, sizes: options.sizes ?? searchSizes }
     )
 
@@ -326,6 +333,7 @@ interface CollectContext {
   readonly trackRadius: number
   readonly width: number
   readonly height: number
+  readonly discoveryThreshold: number
 }
 
 /**
@@ -388,7 +396,11 @@ function collectCandidates(
   if (context.shouldSweep) {
     for (const candidate of sweepFrame(analysis, map, options)) {
       // Do not re-propose something we are already following.
-      if (found.every((f) => overlap(f.rect, candidate.rect) <= 0.3)) found.push(candidate)
+      if (found.some((f) => overlap(f.rect, candidate.rect) > 0.3)) continue
+      // Anything else is a new mark being proposed on this frame alone, and has to
+      // clear the higher bar.
+      if (candidate.score < context.discoveryThreshold) continue
+      found.push(candidate)
     }
   }
 

@@ -34,6 +34,7 @@ export {
 } from "./correlate.ts"
 export { verifyReversibility, type VerifyOptions, type VerifyResult } from "./verify.ts"
 export {
+  DEFAULT_DISCOVERY_THRESHOLD,
   DEFAULT_THRESHOLD,
   DEFAULT_WEIGHTS,
   MIN_COARSE_TEMPLATE,

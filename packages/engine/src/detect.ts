@@ -51,6 +51,22 @@ export const DEFAULT_WEIGHTS: FusedWeights = {
 export const DEFAULT_THRESHOLD = 0.35
 
 /**
+ * Fused score required to *start* a new track from a full-frame sweep.
+ *
+ * Deliberately far above `DEFAULT_THRESHOLD`, because the two decisions are not the
+ * same one. Continuing to follow a mark we already believe in is cheap to get slightly
+ * wrong — the track carries its own history, and one weak frame is smoothed away.
+ * Admitting a new mark somewhere no prior points at is a proposal to alter pixels on
+ * nothing but this frame's evidence, and content that resembles the mark is common:
+ * measured against a real capture, a genuine mark scores ~0.79 while sparkles, glints
+ * and bright glyphs top out around 0.5.
+ *
+ * The asymmetry is the point. Missing a faint mark costs one uncorrected clip; a false
+ * admission subtracts a diamond-shaped hole out of someone's footage.
+ */
+export const DEFAULT_DISCOVERY_THRESHOLD = 0.6
+
+/**
  * Smallest template the coarse pass may use.
  *
  * Downsampling is bounded by this rather than by a fixed factor. A template shrunk

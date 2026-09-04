@@ -109,6 +109,25 @@ describe("planClip", () => {
     assert.ok(after < before * 0.1, `removal over black sky weak: ${before.toFixed(2)} -> ${after.toFixed(2)}`)
   })
 
+  it("will not start a track from a sweep candidate that is merely plausible", () => {
+    // Discovery is a proposal to alter pixels on one frame's evidence alone. Raising
+    // the bar past what this fixture can score must leave the footage untouched
+    // rather than produce a weak track.
+    const at: Rect = { x: 120, y: 130, width: 24, height: 24 }
+    const frames = Array.from({ length: 20 }, (_, i) =>
+      stamped(SIZE.width, SIZE.height, i, MARK, at, 0.8)
+    )
+
+    const plan = planClip(frames, MARK, {
+      sizes: [24],
+      minPersistence: 8,
+      sweepInterval: 5,
+      discoveryThreshold: 0.99,
+    })
+
+    assert.equal(plan.tracks.length, 0)
+  })
+
   it("follows a mark that moves through the frame", () => {
     // The roaming case. A corner-only tool cannot represent this at all.
     const frames = Array.from({ length: 20 }, (_, i) =>
