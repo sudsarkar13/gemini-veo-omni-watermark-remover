@@ -233,8 +233,11 @@ function smoothAlpha(
       previous = frame.alpha
       continue
     }
-    const delta = Math.max(-stepCap, Math.min(stepCap, frame.alpha - previous))
-    const alpha = previous + delta
+    // Bind to a local so the inference of `previous` does not depend on `alpha`,
+    // which is itself derived from `previous`.
+    const base: number = previous
+    const delta = Math.max(-stepCap, Math.min(stepCap, frame.alpha - base))
+    const alpha = base + delta
     out.set(index, { ...frame, alpha })
     previous = alpha
   }
