@@ -1,18 +1,43 @@
 import { alphaMapFromTemplate } from "./alpha-map.ts"
 import { decodePpm } from "./ppm.ts"
+import { VEO_DIAMOND_48_PPM_BASE64 } from "./template-data.ts"
 import type { AlphaMap } from "./types.ts"
 
 /**
  * Loading and generating watermark alpha templates.
  *
- * The real templates are captures of the mark against black, derived by
- * frame-differencing watermark on/off transition pairs (docs/PLAN.md §2). Until those
- * are in the repository, `syntheticDiamond` provides a stand-in with the right gross
- * shape so the pipeline can be exercised end to end.
+ * `veoDiamond48` is a real capture: the mark's alpha recovered from Veo 720p output
+ * (docs/PLAN.md §2). It is the default everywhere, because the shape it encodes is the
+ * thing the detector correlates against and the alpha it encodes is what removal
+ * subtracts — an approximation of either produces a run that reports success and
+ * leaves the mark on screen, which is precisely what the synthetic stand-in did.
  *
- * It is a stand-in, not a substitute. Detection thresholds tuned against it mean
- * nothing until they are re-checked against a real capture.
+ * `syntheticDiamond` remains for tests that need a template with no provenance
+ * attached. It is a stand-in, not a substitute: any threshold tuned against it means
+ * nothing until it is re-checked against a capture.
  */
+
+let cached: AlphaMap | null = null
+
+/**
+ * The measured mark, 48x48, peak alpha ~0.31.
+ *
+ * Parsed once and shared. The map is treated as immutable throughout the engine —
+ * `scaleAlphaMap` and `withGain` both return new maps rather than writing into theirs.
+ */
+export function veoDiamond48(): AlphaMap {
+  if (cached) return cached
+  const binary = atob(VEO_DIAMOND_48_PPM_BASE64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  cached = loadTemplatePpm(bytes)
+  return cached
+}
+
+/** The template used when the caller has not supplied one of their own. */
+export function defaultTemplate(): AlphaMap {
+  return veoDiamond48()
+}
 
 export function loadTemplatePpm(buffer: Uint8Array): AlphaMap {
   const frame = decodePpm(buffer)

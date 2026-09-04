@@ -75,4 +75,4 @@ export {
   type RenderReport,
 } from "./pipeline.ts"
 export { decodePpm, encodePpm } from "./ppm.ts"
-export { loadTemplatePpm, syntheticDiamond } from "./templates.ts"
+export { defaultTemplate, loadTemplatePpm, syntheticDiamond, veoDiamond48 } from "./templates.ts"

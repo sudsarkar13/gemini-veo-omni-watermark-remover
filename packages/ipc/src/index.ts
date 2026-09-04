@@ -114,7 +114,6 @@ export interface JobOptions {
   readonly crf?: number
   readonly preset?: string
   readonly encoder?: "auto" | "software" | "hardware"
-  readonly templateSize?: number
   readonly templatePath?: string
   readonly outputDirectory?: string
   readonly region?: { x: number; y: number; width: number; height: number }

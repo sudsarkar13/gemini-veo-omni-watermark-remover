@@ -33,7 +33,6 @@ export const DEFAULT_OPTIONS: JobOptions = {
   crf: 14,
   preset: "slow",
   encoder: "auto",
-  templateSize: 48,
 }
 
 export function AdvancedDrawer({
@@ -120,18 +119,6 @@ export function AdvancedDrawer({
               value={options.sweepInterval ?? 15}
               disabled={disabled}
               onChange={(event) => set("sweepInterval", Number(event.target.value) || 15)}
-            />
-          </Field>
-
-          <Field label="Mark size" hint="Pixels, when using the built-in template">
-            <Input
-              type="number"
-              min={16}
-              max={256}
-              className="h-8 text-[12px]"
-              value={options.templateSize ?? 48}
-              disabled={disabled}
-              onChange={(event) => set("templateSize", Number(event.target.value) || 48)}
             />
           </Field>
 

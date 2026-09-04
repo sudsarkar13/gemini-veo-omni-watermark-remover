@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 
-import { loadTemplatePpm, syntheticDiamond, type AlphaMap } from "@gvowr/engine"
+import { defaultTemplate, loadTemplatePpm, type AlphaMap } from "@gvowr/engine"
 import { processVideo } from "@gvowr/video"
 
 import type { JobOptions } from "@gvowr/ipc"
@@ -40,7 +40,7 @@ export interface WorkerResult {
 
 async function loadTemplate(options: JobOptions): Promise<AlphaMap> {
   if (options.templatePath) return loadTemplatePpm(await readFile(options.templatePath))
-  return syntheticDiamond(options.templateSize ?? 48)
+  return defaultTemplate()
 }
 
 function send(message: WorkerMessage): void {

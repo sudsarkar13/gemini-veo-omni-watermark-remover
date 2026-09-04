@@ -4,6 +4,7 @@ import { describe, it } from "node:test"
 import { blend } from "./blend.ts"
 import { scaleAlphaMap } from "./alpha-map.ts"
 import { planClip, renderFrame } from "./pipeline.ts"
+import { veoDiamond48 } from "./templates.ts"
 import type { AlphaMap, Frame, Rect } from "./types.ts"
 
 function diamond(size: number, peak: number): AlphaMap {
@@ -42,6 +43,26 @@ function stamped(width: number, height: number, seed: number, mark: AlphaMap, at
   return f
 }
 
+/**
+ * Near-black content with a little drifting detail — a night sky.
+ *
+ * Its ring statistics are the point: a standard deviation well under one level, which
+ * is what breaks a purely scale-free residual test.
+ */
+function nightSky(width: number, height: number, phase: number): Frame {
+  const data = new Uint8ClampedArray(width * height * 3)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const star = (x * 7 + y * 11 + phase * 13) % 601 === 0 ? 140 : 1
+      const i = (y * width + x) * 3
+      data[i] = star
+      data[i + 1] = star
+      data[i + 2] = star
+    }
+  }
+  return { width, height, channels: 3, data }
+}
+
 const MARK = diamond(24, 0.85)
 const SIZE = { width: 192, height: 192 }
 
@@ -61,6 +82,31 @@ describe("planClip", () => {
     const first = track.frames.get(track.firstFrame)!
     assert.ok(Math.abs(first.rect.x - at.x) <= 3, `x off by ${first.rect.x - at.x}`)
     assert.ok(Math.abs(first.rect.y - at.y) <= 3, `y off by ${first.rect.y - at.y}`)
+  })
+
+  it("plans and removes a mark over a background flatter than codec noise", () => {
+    // The case that failed on real footage. Against a night sky the ring's variation
+    // is smaller than the encoder's own noise, so a purely scale-free residual test
+    // rejects a correction that is accurate to under one 8-bit level — detection
+    // succeeds, verification refuses it, and the mark survives a run reported as
+    // successful. Uses the measured template, since its low alpha is part of the case.
+    const mark = veoDiamond48()
+    const at: Rect = { x: 120, y: 130, width: 48, height: 48 }
+    const originals: Frame[] = []
+    const frames = Array.from({ length: 16 }, (_, i) => {
+      const f = nightSky(SIZE.width, SIZE.height, i)
+      originals.push({ ...f, data: Uint8ClampedArray.from(f.data) })
+      blend(f, scaleAlphaMap(mark, at.width, at.height), at, { gain: 1 })
+      return f
+    })
+
+    const plan = planClip(frames, mark, { sizes: [48], minPersistence: 8, sweepInterval: 5 })
+    assert.equal(plan.tracks.length, 1, "the mark was detected but never verified")
+
+    const before = meanError(frames[8] as Frame, originals[8] as Frame, at)
+    renderFrame(frames[8] as Frame, plan, 8, mark)
+    const after = meanError(frames[8] as Frame, originals[8] as Frame, at)
+    assert.ok(after < before * 0.1, `removal over black sky weak: ${before.toFixed(2)} -> ${after.toFixed(2)}`)
   })
 
   it("follows a mark that moves through the frame", () => {

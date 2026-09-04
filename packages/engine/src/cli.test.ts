@@ -13,7 +13,9 @@ function scene(width: number, height: number, seed: number): Frame {
   let state = (0x9e3779b1 ^ seed) >>> 0
   for (let i = 0; i < width * height; i++) {
     state = (state * 1664525 + 1013904223) >>> 0
-    const base = 70 + Math.round(60 * ((i % width) / width)) + ((state >>> 25) & 0x3f)
+    // See the note in pipeline.test.ts: noise this fixture generates has to stay in
+    // the range a real encode produces, or the scores it yields mean nothing.
+    const base = 70 + Math.round(60 * ((i % width) / width)) + ((state >>> 25) & 0x0f)
     data[i * 3] = base
     data[i * 3 + 1] = base
     data[i * 3 + 2] = base
@@ -88,10 +90,13 @@ describe("sequence", () => {
     const to = join(dir, "out")
     await mkdir(from, { recursive: true })
 
+    // Large enough that `defaultSizes` — which derives the search sizes from the frame,
+    // the way Veo scales the mark with resolution — actually covers a 24 px mark. A
+    // fixture smaller than that tests nothing: the sweep never looks at the right size.
     const region = { x: 90, y: 100, width: 24, height: 24 }
     const originals: Frame[] = []
     for (let i = 0; i < 16; i++) {
-      const frame = scene(176, 176, i)
+      const frame = scene(360, 360, i)
       originals.push({ ...frame, data: Uint8ClampedArray.from(frame.data) })
       await writeFile(join(from, `f${String(i).padStart(4, "0")}.ppm`), encodePpm(frame))
     }
@@ -109,7 +114,10 @@ describe("sequence", () => {
       ])
     }
 
-    assert.equal(await main(["sequence", from, to, "--size", "24"]), 0)
+    // No --size: stamping and cleaning both run against the measured template, which
+    // is what production uses. A fixture built with one template and cleaned with
+    // another would pass while telling us nothing.
+    assert.equal(await main(["sequence", from, to]), 0)
 
     const cleaned = decodePpm(await readFile(join(to, "f0008.ppm")))
     const marked = decodePpm(await readFile(join(from, "f0008.ppm")))

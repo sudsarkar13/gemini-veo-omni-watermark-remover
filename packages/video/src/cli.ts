@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 
-import { loadTemplatePpm, syntheticDiamond, type AlphaMap } from "@gvowr/engine"
+import { defaultTemplate, loadTemplatePpm, syntheticDiamond, type AlphaMap } from "@gvowr/engine"
 
 import { probe } from "./probe.ts"
 import { processVideo } from "./process.ts"
@@ -15,8 +15,8 @@ Usage:
   gvowr-video clean <input> <output>        Remove watermarks and re-encode
 
 Options:
-  --template <file.ppm>   Alpha template capture (default: synthetic stand-in)
-  --size <n>              Synthetic template size in pixels (48)
+  --template <file.ppm>   Alpha template capture (default: measured Veo capture)
+  --size <n>              Use the synthetic stand-in at this size instead
   --mode <auto|corner|sweep>   Detection strategy (auto)
   --sweep-interval <n>    Frames between full-frame sweeps (15)
   --crf <n>               Quality, lower is better (14)
@@ -134,7 +134,9 @@ export async function main(argv: readonly string[]): Promise<number> {
 
 async function loadTemplate(path: string | undefined, size: string | undefined): Promise<AlphaMap> {
   if (path) return loadTemplatePpm(await readFile(resolve(path)))
-  return syntheticDiamond(size ? Number(size) : 48)
+  // --size selects the synthetic stand-in deliberately; without it the measured
+  // capture is used, which is the only template that actually removes the mark.
+  return size ? syntheticDiamond(Number(size)) : defaultTemplate()
 }
 
 function report(stage: string, frame: number, total: number, lastPercent: number): number {

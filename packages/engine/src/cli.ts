@@ -8,7 +8,7 @@ import { toGrayscale } from "./correlate.ts"
 import { analyseFrame, sweepFrame } from "./detect.ts"
 import { planClip, renderFrame, type DetectionMode } from "./pipeline.ts"
 import { decodePpm, encodePpm } from "./ppm.ts"
-import { loadTemplatePpm, syntheticDiamond } from "./templates.ts"
+import { defaultTemplate, loadTemplatePpm, syntheticDiamond } from "./templates.ts"
 import type { AlphaMap, Frame, Rect } from "./types.ts"
 import { verifyReversibility } from "./verify.ts"
 
@@ -66,9 +66,13 @@ export async function main(argv: readonly string[]): Promise<number> {
     return command ? 0 : 1
   }
 
+  // --size only makes sense for the synthetic stand-in; the measured template is the
+  // default and carries its own size, which the detector rescales per candidate.
   const template = values.template
     ? loadTemplatePpm(await readFile(resolve(values.template)))
-    : syntheticDiamond(values.size ? Number(values.size) : 48)
+    : values.size
+      ? syntheticDiamond(Number(values.size))
+      : defaultTemplate()
 
   const region = values.region ? parseRegion(values.region) : null
   const gain = values.gain ? Number(values.gain) : null
