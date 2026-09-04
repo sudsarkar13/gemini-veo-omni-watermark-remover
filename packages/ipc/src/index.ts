@@ -75,6 +75,25 @@ export interface JobResult {
   readonly elapsedMs: number
 }
 
+/**
+ * Everything the renderer needs to show a clip: playable URLs plus the filmstrip and
+ * waveform that make the timeline navigable.
+ *
+ * URLs, not pixels. The renderer is Chromium and decodes the file itself, so no frame
+ * data crosses IPC.
+ */
+export interface ClipMedia {
+  readonly sourceUrl: string
+  /** Null until the job has produced a result. */
+  readonly outputUrl: string | null
+  readonly thumbnails: readonly string[]
+  /** Seconds of video each thumbnail represents. */
+  readonly thumbnailInterval: number
+  /** Peak-amplitude envelope in 0..1, or null when the clip has no audio. */
+  readonly waveform: readonly number[] | null
+  readonly aspectRatio: number
+}
+
 export interface Job {
   readonly id: string
   readonly inputPath: string
@@ -148,6 +167,7 @@ export const CHANNELS = {
   jobsStart: "jobs:start",
   jobsCancel: "jobs:cancel",
   jobsReveal: "jobs:reveal",
+  jobsMedia: "jobs:media",
   systemInfo: "system:info",
   settingsGet: "settings:get",
   settingsSet: "settings:set",
@@ -172,6 +192,7 @@ export interface DesktopApi {
   startJob(id: string, options?: JobOptions): Promise<void>
   cancelJob(id: string): Promise<void>
   revealOutput(id: string): Promise<void>
+  getMedia(id: string): Promise<ClipMedia | null>
   systemInfo(): Promise<SystemInfo>
   getSettings(): Promise<Settings>
   setSettings(partial: Partial<Settings>): Promise<Settings>

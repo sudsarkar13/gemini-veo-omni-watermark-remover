@@ -7,6 +7,7 @@ import { hasCalibratedProfile } from "@gvowr/engine"
 import { probe } from "@gvowr/video"
 
 import { estimate } from "./estimate.ts"
+import { registerMedia, setMediaOutput, unregisterMedia } from "./media.ts"
 import type { ClipInfo, Job, JobOptions, JobProgress, JobState } from "@gvowr/ipc"
 import type { StartMessage, WorkerMessage } from "./worker.ts"
 
@@ -76,6 +77,9 @@ export class JobQueue {
         addedAt: Date.now(),
       }
       this.#jobs.set(id, job)
+      // Registering here is what makes the clip playable: the media protocol serves
+      // only files that belong to a job, never an arbitrary path.
+      registerMedia(id, path)
       added.push(job)
     }
     this.#emit()
@@ -118,13 +122,16 @@ export class JobQueue {
 
   remove(id: string): void {
     this.cancel(id)
+    unregisterMedia(id)
     this.#jobs.delete(id)
     this.#emit()
   }
 
   clearFinished(): void {
     for (const [id, job] of this.#jobs) {
-      if (isFinished(job.state)) this.#jobs.delete(id)
+      if (!isFinished(job.state)) continue
+      unregisterMedia(id)
+      this.#jobs.delete(id)
     }
     this.#emit()
   }
@@ -239,6 +246,7 @@ export class JobQueue {
             ? "done-with-skips"
             : "done"
 
+      setMediaOutput(id, output)
       this.#update(id, { state, progress: null, result: { ...result, outputPath: output } })
       return
     }

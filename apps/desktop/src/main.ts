@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs"
 import { stat, writeFile } from "node:fs/promises"
 import { cpus, freemem, totalmem } from "node:os"
-import { join, normalize, resolve, sep } from "node:path"
+import { basename, join, normalize, resolve, sep } from "node:path"
 import { Readable } from "node:stream"
 // Default import, then destructure.
 //
@@ -16,9 +16,26 @@ import type { BrowserWindow as BrowserWindowInstance } from "electron"
 
 const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = electron
 
-import { resolveBinaries } from "@gvowr/video"
+import { extractFilmstrip, extractWaveform, probe, resolveBinaries } from "@gvowr/video"
 
-import { CHANNELS, EVENTS, ACCEPTED_EXTENSIONS, type Job, type JobOptions, type JobProgress, type Settings, type SystemInfo } from "@gvowr/ipc"
+import {
+  ACCEPTED_EXTENSIONS,
+  CHANNELS,
+  EVENTS,
+  type ClipMedia,
+  type Job,
+  type JobOptions,
+  type JobProgress,
+  type Settings,
+  type SystemInfo,
+} from "@gvowr/ipc"
+import {
+  MEDIA_SCHEME,
+  handleMediaRequest,
+  mediaUrl,
+  setMediaThumbnails,
+  thumbnailUrl,
+} from "./media.ts"
 import { JobQueue } from "./queue.ts"
 import { SettingsStore } from "./settings.ts"
 
@@ -35,6 +52,19 @@ import { SettingsStore } from "./settings.ts"
 // because it has imports, so it needs telling.
 declare const __dirname: string
 const here = __dirname
+/**
+ * Claim our own identity before anything reads a path.
+ *
+ * Without this the app is called "Electron" and its userData directory is
+ * ~/Library/Application Support/Electron — the shared default that every unnamed
+ * Electron app uses. Settings would collide with other developers' apps, and, worse,
+ * the single-instance lock is shared too: another such app holding it makes this one
+ * quit silently at startup with no window and no error.
+ *
+ * Must run before app.getPath("userData") is called anywhere.
+ */
+app.setName("Gemini Veo Watermark Remover")
+
 const isDev = !app.isPackaged
 
 /** The static Next.js export. Served over a custom scheme rather than file://. */
@@ -59,9 +89,15 @@ protocol.registerSchemesAsPrivileged([
     scheme: SCHEME,
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
   },
+  {
+    // `stream: true` is what allows range requests, and video seeking depends on them.
+    scheme: MEDIA_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
 ])
 
 let window: BrowserWindowInstance | null = null
+const mediaCache = new Map<string, ClipMedia>()
 let queue: JobQueue
 let settings: SettingsStore
 
@@ -155,6 +191,8 @@ async function createWindow(): Promise<void> {
  * URL cannot walk out of it and read arbitrary files.
  */
 function registerProtocol(): void {
+  protocol.handle(MEDIA_SCHEME, handleMediaRequest)
+
   protocol.handle(SCHEME, async (request) => {
     const url = new URL(request.url)
     const requested = decodeURIComponent(url.pathname)
@@ -233,6 +271,53 @@ function registerHandlers(): void {
   ipcMain.handle(CHANNELS.jobsReveal, (_event, id: string) => {
     const job = queue.list().find((candidate) => candidate.id === id)
     if (job?.result) shell.showItemInFolder(job.result.outputPath)
+  })
+
+  /**
+   * Builds everything the player and timeline need for one clip.
+   *
+   * Filmstrip and waveform are extracted on demand and cached per job: they cost a
+   * pass over the file, and most clips in a queue are never opened.
+   */
+  ipcMain.handle(CHANNELS.jobsMedia, async (_event, id: string): Promise<ClipMedia | null> => {
+    const job = queue.list().find((candidate) => candidate.id === id)
+    if (!job) return null
+
+    const cached = mediaCache.get(id)
+    if (cached) {
+      return { ...cached, outputUrl: job.result ? mediaUrl(id, "output") : null }
+    }
+
+    try {
+      const info = job.info ?? (await probe(job.inputPath))
+      const directory = join(app.getPath("temp"), "gvowr-thumbs", id)
+      const [filmstrip, waveform] = await Promise.all([
+        extractFilmstrip(job.inputPath, directory, undefined, { count: 28, width: 160 }),
+        extractWaveform(job.inputPath, 400),
+      ])
+      setMediaThumbnails(id, filmstrip.directory)
+
+      const media: ClipMedia = {
+        sourceUrl: mediaUrl(id, "source"),
+        outputUrl: job.result ? mediaUrl(id, "output") : null,
+        thumbnails: filmstrip.frames.map((frame) => thumbnailUrl(id, basename(frame))),
+        thumbnailInterval: filmstrip.interval,
+        waveform,
+        aspectRatio: info.width / info.height,
+      }
+      mediaCache.set(id, media)
+      return media
+    } catch {
+      // A clip that cannot be thumbnailed is still playable; degrade rather than fail.
+      return {
+        sourceUrl: mediaUrl(id, "source"),
+        outputUrl: job.result ? mediaUrl(id, "output") : null,
+        thumbnails: [],
+        thumbnailInterval: 0,
+        waveform: null,
+        aspectRatio: job.info ? job.info.width / job.info.height : 16 / 9,
+      }
+    }
   })
 
   ipcMain.handle(CHANNELS.systemInfo, async (): Promise<SystemInfo> => {

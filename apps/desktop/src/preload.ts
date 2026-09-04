@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer } = electron
 import {
   CHANNELS,
   EVENTS,
+  type ClipMedia,
   type DesktopApi,
   type Job,
   type JobOptions,
@@ -34,6 +35,7 @@ const api: DesktopApi = {
     ipcRenderer.invoke(CHANNELS.jobsStart, id, options) as Promise<void>,
   cancelJob: (id) => ipcRenderer.invoke(CHANNELS.jobsCancel, id) as Promise<void>,
   revealOutput: (id) => ipcRenderer.invoke(CHANNELS.jobsReveal, id) as Promise<void>,
+  getMedia: (id) => ipcRenderer.invoke(CHANNELS.jobsMedia, id) as Promise<ClipMedia | null>,
   systemInfo: () => ipcRenderer.invoke(CHANNELS.systemInfo),
   getSettings: () => ipcRenderer.invoke(CHANNELS.settingsGet) as Promise<Settings>,
   setSettings: (partial) => ipcRenderer.invoke(CHANNELS.settingsSet, partial) as Promise<Settings>,
