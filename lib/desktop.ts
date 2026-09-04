@@ -28,6 +28,7 @@ const browserStub: DesktopApi = {
   startJob: async () => {},
   cancelJob: async () => {},
   revealOutput: async () => {},
+  getMedia: async () => null,
   systemInfo: async (): Promise<SystemInfo> => ({
     platform: "darwin",
     arch: "browser",

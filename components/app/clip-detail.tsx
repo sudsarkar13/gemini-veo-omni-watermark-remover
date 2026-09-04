@@ -1,32 +1,29 @@
 "use client"
 
-import {
-  AlertTriangle,
-  FolderOpen,
-  Play,
-  SearchX,
-  Square,
-} from "lucide-react"
+import { AlertTriangle, FolderOpen, Play, SearchX, Square } from "lucide-react"
 import { useState } from "react"
 import type { Job, JobOptions } from "@gvowr/ipc"
 
 import { AdvancedDrawer, DEFAULT_OPTIONS } from "@/components/app/advanced-drawer"
+import { ComparePlayer } from "@/components/app/compare-player"
 import { LiveMeters } from "@/components/app/live-meters"
 import { Preflight } from "@/components/app/preflight"
-import { TrackSummary } from "@/components/app/track-timeline"
+import { Timeline } from "@/components/app/timeline"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useClipMedia } from "@/hooks/use-desktop"
 import { formatBytes, formatDuration } from "@/lib/format"
 
 /**
- * The right-hand pane: everything about the selected clip, and the controls to act
- * on it.
+ * The editing surface for one clip: player on top, timeline beneath it, then the
+ * controls and status that apply to it.
  *
- * A frame preview is not here yet. Showing before/after needs decoded frames, and the
- * IPC contract deliberately carries no pixels — adding that means a separate
- * thumbnail channel. Rather than mock it, the pane reports what is genuinely known.
+ * Seeing the result matters more than reading a summary of it. A tool that changes
+ * someone's footage and then reports "done" in words alone is asking to be trusted;
+ * showing the before and after earns it instead.
  */
 export function ClipDetail({
   job,
@@ -40,9 +37,14 @@ export function ClipDetail({
   onReveal: () => void
 }) {
   const [options, setOptions] = useState<JobOptions>(DEFAULT_OPTIONS)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(job.info?.durationSeconds ?? 0)
+
+  // Keyed on the output path so a finished run reloads the media and the comparison
+  // shows the render that just completed rather than a stale one.
+  const media = useClipMedia(job.id, job.result?.outputPath ?? null)
 
   const busy = job.state === "analysing" || job.state === "processing"
-  const runnable = job.state === "ready" || job.state === "queued"
   const rerunnable = ["done", "done-with-skips", "no-mark-found", "failed", "cancelled"].includes(
     job.state
   )
@@ -50,21 +52,42 @@ export function ClipDetail({
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       <ScrollArea className="flex-1">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-5">
-          <header className="flex flex-col gap-1">
-            <h1 className="truncate text-[15px] font-semibold" title={job.inputPath}>
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 p-4">
+          <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h1 className="min-w-0 truncate text-[14px] font-semibold" title={job.inputPath}>
               {job.fileName}
             </h1>
             {job.info && (
-              <p className="text-[12px] text-muted-foreground tabular">
+              <p className="text-[11px] text-muted-foreground tabular">
                 {job.info.width}×{job.info.height} · {job.info.videoCodec} ·{" "}
-                {job.info.frameRate.toFixed(2)} fps ·{" "}
-                {formatDuration(job.info.durationSeconds)} ·{" "}
+                {job.info.frameRate.toFixed(2)} fps · {formatDuration(job.info.durationSeconds)} ·{" "}
                 {formatBytes(job.info.sizeBytes)} ·{" "}
                 {job.info.hasAudio ? `audio ${job.info.audioCodec ?? ""}`.trim() : "no audio"}
               </p>
             )}
           </header>
+
+          {media ? (
+            <ComparePlayer
+              media={media}
+              frameRate={job.info?.frameRate ?? 30}
+              currentTime={currentTime}
+              onTimeChange={setCurrentTime}
+              onDurationChange={setDuration}
+            />
+          ) : (
+            <Skeleton className="w-full rounded-md" style={{ aspectRatio: 16 / 9 }} />
+          )}
+
+          {media && (
+            <Timeline
+              media={media}
+              duration={duration || (job.info?.durationSeconds ?? 0)}
+              currentTime={currentTime}
+              onSeek={setCurrentTime}
+              result={job.result}
+            />
+          )}
 
           {job.info && !job.info.calibratedResolution && (
             <Badge variant="secondary" className="w-fit gap-1.5 font-normal">
@@ -99,15 +122,8 @@ export function ClipDetail({
 
           {busy && job.progress && <LiveMeters progress={job.progress} />}
 
-          {!busy && job.info && job.estimate && (runnable || rerunnable) && (
+          {!busy && job.info && job.estimate && (
             <Preflight info={job.info} estimate={job.estimate} />
-          )}
-
-          {job.result && (
-            <TrackSummary
-              result={job.result}
-              durationSeconds={job.info?.durationSeconds ?? 0}
-            />
           )}
 
           <AdvancedDrawer options={options} onChange={setOptions} disabled={busy} />
@@ -138,11 +154,7 @@ export function ClipDetail({
               Cancel
             </Button>
           ) : (
-            <Button
-              size="sm"
-              disabled={!job.info}
-              onClick={() => onStart(options)}
-            >
+            <Button size="sm" disabled={!job.info} onClick={() => onStart(options)}>
               <Play className="size-4" />
               {rerunnable ? "Run again" : "Remove watermark"}
             </Button>

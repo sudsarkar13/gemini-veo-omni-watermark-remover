@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 
-import type { Job, JobOptions, Settings, SystemInfo } from "@gvowr/ipc"
+import type { ClipMedia, Job, JobOptions, Settings, SystemInfo } from "@gvowr/ipc"
 import { DEFAULT_SETTINGS } from "@gvowr/ipc"
 
 import { desktop } from "@/lib/desktop"
@@ -128,4 +128,32 @@ export function useTheme(theme: Settings["theme"]): void {
     media.addEventListener("change", apply)
     return () => media.removeEventListener("change", apply)
   }, [theme])
+}
+
+/**
+ * Loads the playable URLs, filmstrip and waveform for one clip.
+ *
+ * Reloads when the job produces a new result, so the "after" side of the comparison
+ * shows the render that just finished rather than a stale one.
+ */
+export function useClipMedia(jobId: string | null, resultKey: string | null): ClipMedia | null {
+  // Stored with the job it belongs to, so switching clips reads as "not loaded yet"
+  // by derivation rather than needing the effect to clear it first. That also removes
+  // the flash of the previous clip's media while the next one loads.
+  const [loaded, setLoaded] = useState<{ jobId: string; media: ClipMedia | null } | null>(null)
+
+  useEffect(() => {
+    if (!jobId) return
+    let cancelled = false
+    void desktop()
+      .getMedia(jobId)
+      .then((media) => {
+        if (!cancelled) setLoaded({ jobId, media })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [jobId, resultKey])
+
+  return loaded && loaded.jobId === jobId ? loaded.media : null
 }
