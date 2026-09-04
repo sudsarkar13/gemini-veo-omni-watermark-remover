@@ -1,0 +1,23 @@
+{
+  "name": "@gvowr/video",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "FFmpeg sidecar I/O: probing, raw frame decode, and encode with audio passthrough.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "gvowr-video": "./src/bin.ts"
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@gvowr/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

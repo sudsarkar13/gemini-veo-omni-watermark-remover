@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "yarn workspaces foreach --all --verbose run test",
-    "typecheck": "tsc --noEmit && yarn workspace @gvowr/engine run typecheck"
+    "typecheck": "tsc --noEmit && yarn workspaces foreach --all --exclude gemini-veo-omni-watermark-remover run typecheck"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

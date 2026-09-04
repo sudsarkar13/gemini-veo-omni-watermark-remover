@@ -611,11 +611,24 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@gvowr/engine@workspace:packages/engine":
+"@gvowr/engine@workspace:*, @gvowr/engine@workspace:packages/engine":
   version: 0.0.0-use.local
   resolution: "@gvowr/engine@workspace:packages/engine"
   dependencies:
     typescript: "npm:^5.9.3"
+  bin:
+    gvowr: ./src/bin.ts
+  languageName: unknown
+  linkType: soft
+
+"@gvowr/video@workspace:packages/video":
+  version: 0.0.0-use.local
+  resolution: "@gvowr/video@workspace:packages/video"
+  dependencies:
+    "@gvowr/engine": "workspace:*"
+    typescript: "npm:^5.9.3"
+  bin:
+    gvowr-video: ./src/bin.ts
   languageName: unknown
   linkType: soft
 
