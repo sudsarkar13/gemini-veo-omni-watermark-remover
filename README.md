@@ -60,6 +60,11 @@ points, waits for the server to answer, then launches Electron pointed at it.
 - **Main-process changes** (`apps/desktop/src/`) are rebuilt automatically, but Electron
   has to restart to pick them up — press `r` then Enter in the terminal.
 - DevTools open automatically in a detached window.
+- If a dev server is **already running** (say you have `yarn dev` open in another
+  terminal), the script reuses it rather than starting a second one — Next refuses to
+  run two dev servers for the same project.
+- Launching it twice will not open two windows. The single-instance lock focuses the
+  window that is already open.
 
 ### The app as users will get it
 
