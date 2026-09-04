@@ -1,0 +1,17 @@
+{
+  "name": "@gvowr/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless watermark detection and removal engine. No Electron, no DOM.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
