@@ -32,3 +32,23 @@ export {
   type Template,
 } from "./correlate.ts"
 export { verifyReversibility, type VerifyOptions, type VerifyResult } from "./verify.ts"
+export {
+  DEFAULT_THRESHOLD,
+  DEFAULT_WEIGHTS,
+  MIN_COARSE_TEMPLATE,
+  analyseFrame,
+  defaultSizes,
+  downsample2,
+  overlap,
+  scoreAt,
+  searchWindow,
+  sizeTemplate,
+  suppressOverlaps,
+  sweepFrame,
+  varianceScore,
+  type Candidate,
+  type FrameAnalysis,
+  type FusedWeights,
+  type SearchOptions,
+  type SizedTemplate,
+} from "./detect.ts"
