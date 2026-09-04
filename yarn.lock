@@ -1603,7 +1603,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tailwindcss/postcss@npm:^4":
+"@tailwindcss/postcss@npm:^4.3.3":
   version: 4.3.3
   resolution: "@tailwindcss/postcss@npm:4.3.3"
   dependencies:
@@ -1726,16 +1726,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^20":
-  version: 20.19.43
-  resolution: "@types/node@npm:20.19.43"
+"@types/node@npm:^26":
+  version: 26.4.1
+  resolution: "@types/node@npm:26.4.1"
   dependencies:
-    undici-types: "npm:~6.21.0"
-  checksum: 10c0/9bcec3b5295bdd77ff0b44a528a69f7e22028c347507ba2c69be47ec84e30299f45043b222e9c86c510e138c9c53b2419dd5cd34920602a4a5a381c288075318
+    undici-types: "npm:~8.3.0"
+  checksum: 10c0/29568336db8bc67740744782492af0e81ab1f88d86eaa07e38cf0a4c8bae7250a7b4b85c80ac1014fc98b2bc6d4bcac872b2c494ee0671b3880eada7c1fdbc94
   languageName: node
   linkType: hard
 
-"@types/react-dom@npm:^19":
+"@types/react-dom@npm:^19.2.7":
   version: 19.2.7
   resolution: "@types/react-dom@npm:19.2.7"
   peerDependencies:
@@ -1744,7 +1744,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/react-is@npm:^19":
+"@types/react-is@npm:^19.2.0":
   version: 19.2.0
   resolution: "@types/react-is@npm:19.2.0"
   dependencies:
@@ -1753,7 +1753,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/react@npm:*, @types/react@npm:^19":
+"@types/react@npm:*, @types/react@npm:^19.2.18":
   version: 19.2.18
   resolution: "@types/react@npm:19.2.18"
   dependencies:
@@ -3553,7 +3553,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint@npm:^9":
+"eslint@npm:^9.39.5":
   version: 9.39.5
   resolution: "eslint@npm:9.39.5"
   dependencies:
@@ -4000,17 +4000,17 @@ __metadata:
   dependencies:
     "@base-ui/react": "npm:^1.8.0"
     "@shadcn/react": "npm:^0.3.1"
-    "@tailwindcss/postcss": "npm:^4"
-    "@types/node": "npm:^20"
-    "@types/react": "npm:^19"
-    "@types/react-dom": "npm:^19"
-    "@types/react-is": "npm:^19"
+    "@tailwindcss/postcss": "npm:^4.3.3"
+    "@types/node": "npm:^26"
+    "@types/react": "npm:^19.2.18"
+    "@types/react-dom": "npm:^19.2.7"
+    "@types/react-is": "npm:^19.2.0"
     class-variance-authority: "npm:^0.7.1"
     cmdk: "npm:^1.1.1"
     cn: "npm:^0.2.5"
     date-fns: "npm:^4.4.0"
     embla-carousel-react: "npm:^8.6.0"
-    eslint: "npm:^9"
+    eslint: "npm:^9.39.5"
     eslint-config-next: "npm:16.3.4"
     input-otp: "npm:^1.5.0"
     lucide-react: "npm:^1.41.0"
@@ -4020,11 +4020,11 @@ __metadata:
     react-dom: "npm:19.2.8"
     react-is: "npm:^19.2.8"
     react-resizable-panels: "npm:^4.12.3"
-    recharts: "npm:^3.8.0"
+    recharts: "npm:^3.10.1"
     shadcn: "npm:^4.21.0"
-    tailwindcss: "npm:^4"
+    tailwindcss: "npm:^4.3.3"
     tw-animate-css: "npm:^1.4.0"
-    typescript: "npm:^5"
+    typescript: "npm:^5.9.3"
   languageName: unknown
   linkType: soft
 
@@ -6078,7 +6078,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"recharts@npm:^3.8.0":
+"recharts@npm:^3.10.1":
   version: 3.10.1
   resolution: "recharts@npm:3.10.1"
   dependencies:
@@ -6872,7 +6872,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tailwindcss@npm:4.3.3, tailwindcss@npm:^4":
+"tailwindcss@npm:4.3.3, tailwindcss@npm:^4.3.3":
   version: 4.3.3
   resolution: "tailwindcss@npm:4.3.3"
   checksum: 10c0/7e9cd7553cd890ffa5350efb0ca8971ba5435257d0f98bf0714994ac8f1fee5c7cdf9a9da47fe83e8ac995d728410837ac49d3ef5ea66b5afe1db312086ffae2
@@ -7063,7 +7063,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"typescript@npm:^5":
+"typescript@npm:^5.9.3":
   version: 5.9.3
   resolution: "typescript@npm:5.9.3"
   bin:
@@ -7073,7 +7073,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"typescript@patch:typescript@npm%3A^5#optional!builtin<compat/typescript>":
+"typescript@patch:typescript@npm%3A^5.9.3#optional!builtin<compat/typescript>":
   version: 5.9.3
   resolution: "typescript@patch:typescript@npm%3A5.9.3#optional!builtin<compat/typescript>::version=5.9.3&hash=5786d5"
   bin:
@@ -7095,10 +7095,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"undici-types@npm:~6.21.0":
-  version: 6.21.0
-  resolution: "undici-types@npm:6.21.0"
-  checksum: 10c0/c01ed51829b10aa72fc3ce64b747f8e74ae9b60eafa19a7b46ef624403508a54c526ffab06a14a26b3120d055e1104d7abe7c9017e83ced038ea5cf52f8d5e04
+"undici-types@npm:~8.3.0":
+  version: 8.3.0
+  resolution: "undici-types@npm:8.3.0"
+  checksum: 10c0/c8aa7e2fbebfce519654dafadc0ece59be888d2ccaf180fb4495da875e7b536d2456345c384069c7e6f3e9c9ab7435f074957da306f142343eee86ff8048855a
   languageName: node
   linkType: hard
 
