@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "test": "yarn workspaces foreach --all --verbose run test",
-    "typecheck": "tsc --noEmit && yarn workspaces foreach --all --exclude gemini-veo-omni-watermark-remover run typecheck"
+    "typecheck": "tsc --noEmit && yarn workspaces foreach --all --exclude gemini-veo-omni-watermark-remover run typecheck",
+    "dev:desktop": "node scripts/dev-desktop.mjs",
+    "build:desktop": "yarn build && yarn workspace @gvowr/desktop run build",
+    "start:desktop": "yarn workspace @gvowr/desktop run start"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

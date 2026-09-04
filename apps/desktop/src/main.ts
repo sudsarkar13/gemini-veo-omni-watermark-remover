@@ -40,6 +40,16 @@ const isDev = !app.isPackaged
 /** The static Next.js export. Served over a custom scheme rather than file://. */
 const rendererRoot = isDev ? resolve(here, "../../../out") : join(process.resourcesPath, "renderer")
 
+/**
+ * When set, the renderer is loaded from the Next dev server instead of the static
+ * export. That is what makes hot reload work — editing a component updates the
+ * running window rather than requiring a rebuild of the export first.
+ *
+ * Never set in a packaged build: the app must not depend on a server that is not
+ * there.
+ */
+const devServer = isDev ? process.env["GVOWR_DEV_SERVER"] : undefined
+
 const SCHEME = "app"
 
 // Must be registered before the app is ready. Marking it standard gives the page a
@@ -96,10 +106,16 @@ async function createWindow(): Promise<void> {
     return { action: "deny" }
   })
   window.webContents.on("will-navigate", (event: Electron.Event, url: string) => {
-    if (!url.startsWith(`${SCHEME}://`)) event.preventDefault()
+    const allowed = url.startsWith(`${SCHEME}://`) || (devServer !== undefined && url.startsWith(devServer))
+    if (!allowed) event.preventDefault()
   })
 
-  await window.loadURL(`${SCHEME}://local/index.html`)
+  if (devServer) {
+    await window.loadURL(devServer)
+    window.webContents.openDevTools({ mode: "detach" })
+  } else {
+    await window.loadURL(`${SCHEME}://local/index.html`)
+  }
 
   // Headless self-check for CI: confirms the protocol served the renderer and that
   // the preload bridge is actually reachable from the page, then exits. Checking the
