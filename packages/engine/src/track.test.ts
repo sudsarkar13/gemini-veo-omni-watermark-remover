@@ -58,10 +58,35 @@ describe("ingestFrame", () => {
 describe("consolidate", () => {
   it("drops tracks that never persisted", () => {
     // A lens flare or specular glint will not hold position for long. This is where
-    // most false positives die.
-    const result = buildTracks([[seen(box(10, 10))], [seen(box(11, 10))], []], { minPersistence: 8 })
+    // most false positives die. Placed mid-clip, where a mark has every opportunity
+    // to persist and simply does not.
+    const frames: Observation[][] = Array.from({ length: 20 }, () => [])
+    frames[5] = [seen(box(10, 10))]
+    frames[6] = [seen(box(11, 10))]
+
+    const result = buildTracks(frames, { minPersistence: 8 })
     assert.equal(result.tracks.length, 0)
     assert.equal(result.rejected, 1)
+  })
+
+  it("keeps a short track the clip's own end cut off", () => {
+    // A mark that appears three frames before the last one cannot hold for eight, and
+    // demanding it discards a real detection for failing to provide evidence the clip
+    // never had. Mid-clip the bar is unchanged; only at the ends does it relax, and
+    // only as far as the footage could possibly show.
+    const frames: Observation[][] = Array.from({ length: 20 }, () => [])
+    for (const f of [17, 18, 19]) frames[f] = [seen(box(200, 200))]
+
+    const result = buildTracks(frames, { minPersistence: 8 })
+    assert.equal(result.tracks.length, 1)
+    assert.equal(result.rejected, 0)
+  })
+
+  it("still drops a short track that had room to persist", () => {
+    const frames: Observation[][] = Array.from({ length: 20 }, () => [])
+    for (const f of [10, 11, 12]) frames[f] = [seen(box(200, 200))]
+
+    assert.equal(buildTracks(frames, { minPersistence: 8 }).tracks.length, 0)
   })
 
   it("keeps a track that persisted", () => {

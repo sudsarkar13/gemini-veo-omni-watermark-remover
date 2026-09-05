@@ -96,6 +96,7 @@ export function ingestFrame(
       if (claimed.has(track.id)) continue
       const last = track.frames.get(track.lastFrame)
       if (!last) continue
+
       const d = distance(last.rect, observation.rect)
       if (d <= matchRadius && d < bestDistance) {
         best = track
@@ -149,7 +150,12 @@ export interface ConsolidationResult {
  */
 export function consolidate(
   tracks: readonly MutableTrack[],
-  options: TrackOptions = {}
+  options: TrackOptions = {},
+  /**
+   * Total frames in the clip, so persistence is judged against the evidence that
+   * could exist rather than an absolute count. Omit to judge against the count alone.
+   */
+  frameCount?: number
 ): ConsolidationResult {
   const minPersistence = options.minPersistence ?? DEFAULTS.minPersistence
   const maxGap = options.maxInterpolationGap ?? DEFAULTS.maxInterpolationGap
@@ -160,7 +166,7 @@ export function consolidate(
   let rejected = 0
 
   for (const track of tracks) {
-    if (track.frames.size < minPersistence) {
+    if (track.frames.size < requiredPersistence(track, minPersistence, frameCount)) {
       rejected++
       continue
     }
@@ -317,5 +323,32 @@ export function buildTracks(
 ): ConsolidationResult {
   const tracks: MutableTrack[] = []
   perFrame.forEach((observations, index) => ingestFrame(tracks, index, observations, options))
-  return consolidate(tracks, options)
+  return consolidate(tracks, options, perFrame.length)
+}
+
+/**
+ * How many frames this particular track has to hold for before it is believed.
+ *
+ * Persistence is a proxy for corroboration: a lens flare will not keep a coherent
+ * position and a stable alpha for long, and a watermark will. But the clip's own ends
+ * bound how much corroboration can exist at all. A mark that appears three frames
+ * before the last one cannot hold for eight, and demanding it discards a real
+ * detection for failing to provide evidence the clip never had — which is how a
+ * roaming mark, visible only as an object swings past the camera at the end of a
+ * shot, went unremoved while the corner mark was handled perfectly.
+ *
+ * So the bar is the full requirement or the room available, whichever is smaller.
+ * Mid-clip nothing changes; only at the ends does it relax, and only to what the
+ * footage could possibly show.
+ */
+function requiredPersistence(
+  track: MutableTrack,
+  minPersistence: number,
+  frameCount: number | undefined
+): number {
+  if (frameCount === undefined || frameCount <= 0) return minPersistence
+  const observed = [...track.frames.keys()]
+  const first = Math.min(...observed)
+  const last = Math.max(...observed)
+  return Math.min(minPersistence, frameCount - first, last + 1)
 }
