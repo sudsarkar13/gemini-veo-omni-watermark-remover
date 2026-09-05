@@ -121,6 +121,17 @@ export function ComparePlayer({
    * element half the box and lets `object-contain` fit the picture inside it, so the
    * geometry changes without the elements ever going away.
    */
+  /**
+   * Side by side needs a box twice as wide, not two videos crammed into one.
+   *
+   * The box used to keep the clip's own aspect ratio in every mode, so each half was
+   * 8:9 and a 16:9 picture letterboxed into it — half the box left as black while the
+   * pane either side of the box went unused. Doubling the ratio for this mode lets
+   * each half be exactly one frame, and the box then claims the horizontal room it
+   * needs to do it.
+   */
+  const boxAspect = mode === "side" && hasAfter ? media.aspectRatio * 2 : media.aspectRatio
+
   const geometry: { before: React.CSSProperties; after: React.CSSProperties } =
     mode === "side" && hasAfter
       ? { before: { left: 0, width: "50%" }, after: { left: "50%", width: "50%" } }
@@ -146,16 +157,27 @@ export function ComparePlayer({
   return (
     <div className={cn("flex flex-col gap-2", className)}>
       {/*
-       * The monitor takes the height it is given and derives its width from the clip's
-       * aspect ratio, so the picture box tracks the real frame rather than the pane.
-       * That keeps the split divider over actual video instead of over letterboxing —
-       * a divider that drifts onto a black bar makes the comparison hard to read.
+       * The monitor is fitted to the pane rather than merely bounded by it.
+       *
+       * `height: 100%` alone only works when the pane is the taller constraint; when
+       * it is the wider one the height stays put and the aspect ratio silently breaks,
+       * which is what left a 32:9 side-by-side box shaped like 16:9. Taking the
+       * smaller of the two candidate heights — the pane's, and the one the pane's own
+       * width implies — fits the box under either constraint, so it always tracks the
+       * real frame and the split divider stays over actual video instead of drifting
+       * onto a black bar.
        */}
-      <div className="flex min-h-0 flex-1 items-center justify-center">
+      <div
+        className="flex min-h-0 flex-1 items-center justify-center"
+        style={{ containerType: "inline-size" }}
+      >
         <div
           ref={containerRef}
-          className="relative h-full max-w-full overflow-hidden rounded-md border border-border bg-black"
-          style={{ aspectRatio: media.aspectRatio }}
+          className="relative overflow-hidden rounded-md border border-border bg-black"
+          style={{
+            aspectRatio: boxAspect,
+            height: `min(100%, calc(100cqw / ${boxAspect}))`,
+          }}
           onMouseMove={(event) => {
             if (mode === "split" && event.buttons === 1) onSplitDrag(event)
           }}
@@ -208,6 +230,12 @@ export function ComparePlayer({
                 if (event.key === "ArrowRight") setSplit((v) => Math.min(1, v + 0.02))
               }}
             />
+          )}
+
+          {mode === "side" && hasAfter && (
+            // The two halves butt together, so on similar frames — which is the whole
+            // point of the comparison — the seam is invisible without this.
+            <div aria-hidden className="absolute inset-y-0 left-1/2 z-10 w-px bg-border" />
           )}
 
           {hasAfter && (mode === "split" || mode === "side") && (
