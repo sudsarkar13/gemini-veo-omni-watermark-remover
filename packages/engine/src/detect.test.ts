@@ -5,6 +5,7 @@ import { LOGO_VALUE } from "./constants.ts"
 import type { Grayscale } from "./correlate.ts"
 import {
   analyseFrame,
+  coarseSteps,
   defaultSizes,
   downsample2,
   overlap,
@@ -255,5 +256,49 @@ describe("defaultSizes", () => {
     const sizes = defaultSizes(320, 180)
     assert.deepEqual(sizes, [...new Set(sizes)].sort((a, b) => a - b))
     assert.ok(sizes.every((s) => s >= 16))
+  })
+})
+
+describe("coarseSteps", () => {
+  it("thins the ladder to what a correlation can tell apart", () => {
+    // The coarse pass locates marks; the refine pass measures them. Scanning five
+    // scales where two suffice is five times the most expensive loop in the engine.
+    const steps = coarseSteps([34, 41, 48, 58, 70])
+    assert.ok(steps.length < 5, `expected fewer than five coarse scales, got ${steps.length}`)
+    assert.equal(steps[0], 34, "the smallest size must still be scanned")
+    assert.equal(steps[steps.length - 1], 70, "so must the largest")
+  })
+
+  it("never widens a gap past the tolerance", () => {
+    const steps = coarseSteps(defaultSizes(1920, 1080))
+    for (let i = 1; i < steps.length; i++) {
+      const ratio = (steps[i] as number) / (steps[i - 1] as number)
+      assert.ok(ratio <= 1.5, `coarse scales ${steps[i - 1]} and ${steps[i]} are ${ratio.toFixed(2)}x apart`)
+    }
+  })
+
+  it("keeps a single size intact", () => {
+    assert.deepEqual(coarseSteps([48]), [48])
+  })
+})
+
+describe("sweepFrame size refinement", () => {
+  it("settles on a size the ladder does not contain", () => {
+    // A real mark can sit squarely between two rungs and score worse against both
+    // than against its own size — enough to fall under the bar for starting a track.
+    // Size is not only a detection question: the alpha map is scaled to it, so a size
+    // that is off leaves a ring of residue behind the removal.
+    const image = scene(400, 400)
+    const mark = diamond(50, 0.85)
+    stamp(image, mark, { x: 150, y: 160 })
+
+    const found = sweepFrame(analyseFrame(image), diamond(48, 0.85), { sizes: [34, 41, 48, 58, 70] })
+
+    assert.ok(found.length > 0, "did not find the mark at all")
+    const best = found[0] as Candidate
+    assert.ok(
+      Math.abs(best.rect.width - 50) <= 2,
+      `expected a size near 50, settled on ${best.rect.width}`
+    )
   })
 })

@@ -296,37 +296,92 @@ export function sweepFrame(
   const coarse = factor === 1 ? analysis : analyseFrame(coarseImage)
 
   const peaks: Candidate[] = []
-  for (const size of sizes) {
+  for (const size of coarseSteps(sizes)) {
     const coarseSize = Math.max(MIN_COARSE_TEMPLATE, Math.round(size / factor))
     if (coarseSize + 1 >= Math.min(coarse.image.width, coarse.image.height)) continue
     const template = sizeTemplate(map, coarseSize)
 
+    // Non-maximum suppression on a grid, rather than keeping every position that
+    // clears the bar. A quarter of a frame's positions clear it, so collecting them
+    // all meant allocating a few hundred thousand objects per sweep and then sorting
+    // them — far more work than the correlation that produced them. One winner per
+    // cell keeps the survivors spread across the frame instead of clustered on
+    // whichever mark happens to be strongest.
+    const cellsX = Math.ceil(coarse.image.width / coarseSize)
+    const cells = new Map<number, Candidate>()
+
     for (let y = 0; y <= coarse.image.height - coarseSize; y++) {
       for (let x = 0; x <= coarse.image.width - coarseSize; x++) {
+        // Four lookups before a thousand multiply-adds. The mark composites white, so
+        // it always brightens the patch it covers; a patch no brighter than what
+        // surrounds it cannot be one, and the verifier would reject it anyway.
+        if (!brighterThanSurroundings(coarse, x, y, coarseSize)) continue
+
         // Half threshold at the coarse level: downsampling blurs the mark, so scores
         // are systematically lower here. Being strict now loses real detections.
         const candidate = scoreAt(coarse, template, x, y, kernel, weights)
-        if (candidate.score >= threshold * 0.5) {
-          peaks.push({
-            ...candidate,
-            rect: { x: x * factor, y: y * factor, width: size, height: size },
-          })
-        }
+        if (candidate.score < threshold * 0.5) continue
+
+        const cell = Math.floor(y / coarseSize) * cellsX + Math.floor(x / coarseSize)
+        const held = cells.get(cell)
+        if (held && held.score >= candidate.score) continue
+        cells.set(cell, {
+          ...candidate,
+          rect: { x: x * factor, y: y * factor, width: size, height: size },
+        })
       }
     }
+
+    for (const candidate of cells.values()) peaks.push(candidate)
   }
 
   // Refine the strongest coarse peaks at full resolution.
+  //
+  // Anchored on the peak's centre rather than its corner. The coarse pass reports a
+  // box at a nearby scale, so its corner sits half the size difference away from the
+  // true one while its centre does not move — searching each size around the shared
+  // centre keeps every window small and still covers the scale the coarse pass
+  // skipped. Anchoring on the corner instead needs a window that grows with the mark,
+  // which costs far more and finds the right size less reliably.
   const fullTemplates = sizes.map((size) => sizeTemplate(map, size))
   const refined: Candidate[] = []
   for (const peak of suppressOverlaps(peaks, maxOverlap).slice(0, maxCandidates * 4)) {
-    const window: Rect = {
-      x: peak.rect.x - refineRadius,
-      y: peak.rect.y - refineRadius,
-      width: refineRadius * 2,
-      height: refineRadius * 2,
+    const centreX = peak.rect.x + peak.rect.width / 2
+    const centreY = peak.rect.y + peak.rect.height / 2
+
+    const at = (template: SizedTemplate): Candidate | null => {
+      const window: Rect = {
+        x: Math.round(centreX - template.size / 2) - refineRadius,
+        y: Math.round(centreY - template.size / 2) - refineRadius,
+        width: refineRadius * 2,
+        height: refineRadius * 2,
+      }
+      return searchWindow(analysis, [template], window, { kernel, weights })
     }
-    const best = searchWindow(analysis, fullTemplates, window, { kernel, weights })
+
+    let best: Candidate | null = null
+    for (const template of fullTemplates) {
+      const found = at(template)
+      if (found && (!best || found.score > best.score)) best = found
+    }
+
+    // Then settle the size between the ladder's rungs.
+    //
+    // The ladder is spaced about 20% apart, so a real mark can sit squarely between
+    // two rungs and score meaningfully worse against both than against its own size —
+    // enough to fall under the bar for starting a track, which is exactly what hid a
+    // 56 px roaming mark behind rungs at 48 and 58. Size is not only a detection
+    // question either: the alpha map is scaled to it, so a size that is off leaves a
+    // ring of residue behind the removal.
+    if (best) {
+      for (const delta of SIZE_REFINEMENTS) {
+        const size = best.rect.width + delta
+        if (size < MIN_COARSE_TEMPLATE || sizes.includes(size)) continue
+        const found = at(sizeTemplate(map, size))
+        if (found && found.score > best.score) best = found
+      }
+    }
+
     if (best && best.score >= threshold) refined.push(best)
   }
 
@@ -346,6 +401,74 @@ export function defaultSizes(width: number, height: number): number[] {
     sizes.add(Math.max(16, Math.round(base * ratio)))
   }
   return [...sizes].sort((a, b) => a - b)
+}
+
+/**
+ * Scale spacing for the coarse pass.
+ *
+ * Correlation against a diamond tolerates a size error of roughly this much, so the
+ * coarse pass does not need the fine pass's ladder of sizes: it locates marks, it does
+ * not measure them, and the refine step establishes the real size afterwards. Five
+ * coarse scales where two suffice is five times the most expensive loop in the engine.
+ */
+const COARSE_SCALE_STEP = 0.7
+
+/**
+ * Size offsets tried around the best rung of the ladder, in pixels.
+ *
+ * Small and few: this settles a mark between rungs, it does not re-search scale.
+ */
+const SIZE_REFINEMENTS = [-6, -4, -2, 2, 4, 6] as const
+
+/** The subset of `sizes` the coarse pass actually needs to scan. */
+export function coarseSteps(sizes: readonly number[]): number[] {
+  const ordered = [...new Set(sizes)].sort((a, b) => a - b)
+  if (ordered.length === 0) return []
+
+  // Keep a rung when the *next* one would fall outside tolerance of the last kept.
+  //
+  // Keeping rungs greedily on the way up and then bolting the largest on at the end
+  // is the obvious version and it is wrong: it can leave the final pair nearly twice
+  // the intended distance apart, which is a hole in scale coverage rather than a
+  // saving. Looking one rung ahead keeps every consecutive pair inside the tolerance
+  // and still lands on the largest, because the last rung has nothing after it.
+  const steps: number[] = [ordered[0] as number]
+  for (let i = 1; i < ordered.length; i++) {
+    const next = ordered[i + 1]
+    const last = steps[steps.length - 1] as number
+    if (next === undefined || next > last * (1 + COARSE_SCALE_STEP)) {
+      steps.push(ordered[i] as number)
+    }
+  }
+  return steps
+}
+
+/**
+ * Whether the square at this position is brighter than the band around it.
+ *
+ * Four summed-area lookups instead of a correlation. This is the same lift the
+ * verifier insists on, applied early and cheaply: the mark composites white, so it
+ * cannot leave the region it covers darker than its surroundings. Used only to skip
+ * work — anything it lets through is scored normally.
+ */
+function brighterThanSurroundings(
+  analysis: FrameAnalysis,
+  x: number,
+  y: number,
+  size: number
+): boolean {
+  const pad = Math.max(2, size >> 2)
+  const x0 = Math.max(0, x - pad)
+  const y0 = Math.max(0, y - pad)
+  const x1 = Math.min(analysis.image.width, x + size + pad)
+  const y1 = Math.min(analysis.image.height, y + size + pad)
+
+  const inner = patchSum(analysis.integral, { x, y, width: size, height: size })
+  const outer = patchSum(analysis.integral, { x: x0, y: y0, width: x1 - x0, height: y1 - y0 })
+
+  const ringArea = (x1 - x0) * (y1 - y0) - size * size
+  if (ringArea <= 0) return true
+  return inner / (size * size) > (outer - inner) / ringArea
 }
 
 /** Intersection over union of two rects. */
