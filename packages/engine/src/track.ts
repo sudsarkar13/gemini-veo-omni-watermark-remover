@@ -1,4 +1,4 @@
-import { ALPHA_STEP_CAP } from "./constants.ts"
+import { ALPHA_FRAME_TRUST, ALPHA_STEP_CAP } from "./constants.ts"
 import type { FrameState, MarkVariant, Rect, TrackedFrame, WatermarkTrack } from "./types.ts"
 
 /**
@@ -415,6 +415,24 @@ function smoothAlpha(
   stepCap: number
 ): Map<number, TrackedFrame> {
   const ordered = [...frames.keys()].sort((a, b) => a - b)
+
+  // What the track says its intensity is, weighted by how well each frame was placed
+  // to measure it.
+  //
+  // The mark's alpha is a property of the encode, not of the frame it lands on, but
+  // the per-frame estimate is only as good as the background behind it: against black
+  // sky it comes back at 1.00 every time, and against bright moving content it wanders
+  // between 0.75 and 1.22. Letting a badly-placed frame keep its own answer is what
+  // makes the corner mark fade back in for a few frames and out again — a fifth of it
+  // left behind, changing every frame, which reads as a flicker rather than as
+  // residue. Frames that could measure it keep their reading; frames that could not
+  // defer to the ones that could.
+  const anchor = confidenceWeightedMedian(ordered.map((i) => frames.get(i) as TrackedFrame))
+  const strongest = Math.max(
+    ...ordered.map((i) => (frames.get(i) as TrackedFrame).confidence),
+    Number.EPSILON
+  )
+
   const out = new Map<number, TrackedFrame>()
   let previous: number | null = null
 
@@ -424,21 +442,48 @@ function smoothAlpha(
       out.set(index, frame)
       continue
     }
+
+    const trust = ALPHA_FRAME_TRUST * Math.max(0, Math.min(1, frame.confidence / strongest))
+    const measured = anchor === null ? frame.alpha : anchor + (frame.alpha - anchor) * trust
+
     if (previous === null) {
-      out.set(index, frame)
-      previous = frame.alpha
+      out.set(index, { ...frame, alpha: measured })
+      previous = measured
       continue
     }
     // Bind to a local so the inference of `previous` does not depend on `alpha`,
     // which is itself derived from `previous`.
     const base: number = previous
-    const delta = Math.max(-stepCap, Math.min(stepCap, frame.alpha - base))
+    const delta = Math.max(-stepCap, Math.min(stepCap, measured - base))
     const alpha = base + delta
     out.set(index, { ...frame, alpha })
     previous = alpha
   }
 
   return out
+}
+
+/**
+ * The track's own intensity, taking each frame's word in proportion to its confidence.
+ *
+ * A median rather than a mean, so a handful of wild readings on busy frames cannot
+ * drag it; weighted, so the frames that could actually see the mark decide it.
+ */
+function confidenceWeightedMedian(frames: readonly TrackedFrame[]): number | null {
+  const samples = frames
+    .filter((frame) => frame.state === "detected" && frame.confidence > 0)
+    .map((frame) => ({ alpha: frame.alpha, weight: frame.confidence }))
+    .sort((a, b) => a.alpha - b.alpha)
+
+  if (samples.length === 0) return null
+
+  const total = samples.reduce((sum, sample) => sum + sample.weight, 0)
+  let seen = 0
+  for (const sample of samples) {
+    seen += sample.weight
+    if (seen >= total / 2) return sample.alpha
+  }
+  return samples[samples.length - 1]?.alpha ?? null
 }
 
 /** Convenience: run a whole clip's observations through both passes. */

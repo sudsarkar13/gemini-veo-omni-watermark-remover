@@ -300,3 +300,41 @@ describe("user-drawn regions", () => {
     assert.equal(buildTracks(frames, { minPersistence: 8 }).tracks.length, 0)
   })
 })
+
+describe("intensity smoothing", () => {
+  it("does not let one badly placed frame run the correction short", () => {
+    // The mark's alpha is a property of the encode. A frame whose background makes it
+    // hard to measure reports a low intensity while its correlation score stays high,
+    // and the correction then runs short for a stretch and recovers — residue that
+    // changes every frame, which reads as a flicker rather than as residue.
+    const frames: Observation[][] = []
+    for (let f = 0; f < 20; f++) {
+      const bad = f >= 8 && f <= 11
+      frames.push([seen(box(200, 200), bad ? 0.78 : 1.0, bad ? 0.6 : 0.8)])
+    }
+
+    const track = buildTracks(frames, { minPersistence: 4 }).tracks[0]!
+    const applied = [...Array(20).keys()].map((f) => track.frames.get(f)?.alpha ?? 0)
+    const sag = Math.min(...applied.slice(8, 12))
+
+    assert.ok(sag > 0.93, `intensity sagged to ${sag.toFixed(2)} on the hard frames`)
+
+    // The reported disagreement is 0.22; what actually gets applied should be a small
+    // fraction of it, since a jump the eye can follow is the whole problem.
+    const swing = applied
+      .slice(1)
+      .map((v, i) => Math.abs(v - (applied[i] as number)))
+      .reduce((a, b) => Math.max(a, b), 0)
+    assert.ok(swing < 0.22 * 0.25, `intensity swung by ${swing.toFixed(3)} between frames`)
+  })
+
+  it("still follows a genuine change the whole track agrees on", () => {
+    const frames: Observation[][] = []
+    for (let f = 0; f < 20; f++) frames.push([seen(box(200, 200), f < 10 ? 0.6 : 1.0, 0.8)])
+
+    const track = buildTracks(frames, { minPersistence: 4 }).tracks[0]!
+    const first = track.frames.get(0)!.alpha
+    const last = track.frames.get(19)!.alpha
+    assert.ok(last > first, `expected the intensity to move, ${first} -> ${last}`)
+  })
+})
