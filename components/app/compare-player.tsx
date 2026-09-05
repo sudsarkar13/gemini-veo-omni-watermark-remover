@@ -69,6 +69,10 @@ export function ComparePlayer({
   const [chosenMode, setChosenMode] = useState<CompareMode | null>(null)
   // Marking always shows the original. Pointing at a mark on the cleaned copy would
   // mean drawing over the very thing that is supposed to be gone.
+  //
+  // Choosing a comparison leaves Mark mode rather than being refused by it. Locking
+  // the modes out while marking meant that after a run — with Mark mode still on from
+  // before it — the whole point of the run could not be looked at.
   const mode: CompareMode = marking ? "before" : (chosenMode ?? (hasAfter ? "split" : "before"))
   const setMode = setChosenMode
 
@@ -297,8 +301,11 @@ export function ComparePlayer({
               variant={mode === value ? "secondary" : "ghost"}
               size="sm"
               className="h-7 px-2 text-[11px]"
-              disabled={marking || (!hasAfter && value !== "before")}
-              onClick={() => setMode(value)}
+              disabled={!hasAfter && value !== "before"}
+              onClick={() => {
+                if (marking) onMarkingChange(false)
+                setMode(value)
+              }}
             >
               {label}
             </Button>

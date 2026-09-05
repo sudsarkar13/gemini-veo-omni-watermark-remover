@@ -211,6 +211,10 @@ export function ClipDetail({
               setMarks((current) => current.filter((mark) => mark.id !== id))
               setSelectedMark((current) => (current === id ? null : current))
             }}
+            onClear={() => {
+              setMarks([])
+              setSelectedMark(null)
+            }}
             disabled={busy}
           />
 
@@ -251,9 +255,12 @@ export function ClipDetail({
             <Button
               size="sm"
               disabled={!job.info}
-              onClick={() =>
+              onClick={() => {
+                // Starting a run ends marking: what happens next is something to
+                // look at, and the comparison views are what it is for.
+                setMarking(false)
                 onStart(marks.length > 0 ? { ...options, manualMarks: marks } : options)
-              }
+              }}
             >
               <Play className="size-4" />
               {rerunnable ? "Run again" : "Remove watermark"}
