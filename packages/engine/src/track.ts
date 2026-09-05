@@ -314,22 +314,73 @@ function smoothPositions(
       continue
     }
 
-    const xs: number[] = []
-    const ys: number[] = []
+    // Median the deviation from the track's local motion, not the position itself.
+    //
+    // A plain median assumes the mark is standing still and jitter is all it sees. On
+    // a mark that is actually travelling, the neighbours it averages over are at
+    // genuinely different places, so it drags the position backwards along the path —
+    // a mark moving thirty pixels a frame ends up corrected a whole frame behind
+    // itself, which subtracts the template from the wrong pixels twice over. Fitting
+    // the straight line first and medianing what is left over keeps the jitter
+    // rejection and leaves constant motion untouched.
+    const window: { t: number; x: number; y: number }[] = []
     for (let j = Math.max(0, i - half); j <= Math.min(ordered.length - 1, i + half); j++) {
-      const neighbour = frames.get(ordered[j] as number) as TrackedFrame
+      const at = ordered[j] as number
+      const neighbour = frames.get(at) as TrackedFrame
       if (neighbour.state === "occluded") continue
-      xs.push(neighbour.rect.x)
-      ys.push(neighbour.rect.y)
+      window.push({ t: at, x: neighbour.rect.x, y: neighbour.rect.y })
     }
+
+    const trend = fitLine(window)
+    const atIndex = { x: trend.x0 + trend.vx * index, y: trend.y0 + trend.vy * index }
+    const xs = window.map((p) => p.x - (trend.x0 + trend.vx * p.t))
+    const ys = window.map((p) => p.y - (trend.y0 + trend.vy * p.t))
 
     out.set(index, {
       ...frame,
-      rect: { ...frame.rect, x: median(xs), y: median(ys) },
+      rect: {
+        ...frame.rect,
+        x: Math.round(atIndex.x + median(xs)),
+        y: Math.round(atIndex.y + median(ys)),
+      },
     })
   }
 
   return out
+}
+
+/**
+ * Least-squares straight line through a window of positions, expressed at `t = 0`.
+ *
+ * Two points define the velocity exactly and fewer define none, which is the right
+ * answer for a track too short to have shown its motion yet.
+ */
+function fitLine(points: readonly { t: number; x: number; y: number }[]): {
+  x0: number
+  y0: number
+  vx: number
+  vy: number
+} {
+  const n = points.length
+  if (n === 0) return { x0: 0, y0: 0, vx: 0, vy: 0 }
+
+  const meanT = points.reduce((s, p) => s + p.t, 0) / n
+  const meanX = points.reduce((s, p) => s + p.x, 0) / n
+  const meanY = points.reduce((s, p) => s + p.y, 0) / n
+
+  let varT = 0
+  let covX = 0
+  let covY = 0
+  for (const p of points) {
+    const dt = p.t - meanT
+    varT += dt * dt
+    covX += dt * (p.x - meanX)
+    covY += dt * (p.y - meanY)
+  }
+
+  const vx = varT > 0 ? covX / varT : 0
+  const vy = varT > 0 ? covY / varT : 0
+  return { x0: meanX - vx * meanT, y0: meanY - vy * meanT, vx, vy }
 }
 
 function median(values: number[]): number {

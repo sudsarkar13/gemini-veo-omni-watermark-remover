@@ -241,3 +241,41 @@ describe("consolidate", () => {
     assert.equal(result.rejected, 0)
   })
 })
+
+describe("position smoothing", () => {
+  it("rejects jitter without dragging a moving mark off its path", () => {
+    // A plain median assumes the mark is standing still and jitter is all it sees. On
+    // one that is travelling it averages over genuinely different places and drags the
+    // position backwards along the path, subtracting the template from the wrong
+    // pixels. The fit has to survive the smoothing.
+    const frames: Observation[][] = []
+    for (let f = 0; f < 12; f++) {
+      const jitter = f === 6 ? 9 : 0
+      frames.push([seen(box(100 + f * 30 + jitter, 100 + f * 12))])
+    }
+
+    const result = buildTracks(frames, { minPersistence: 4 })
+    assert.equal(result.tracks.length, 1)
+    const track = result.tracks[0]!
+
+    for (let f = 2; f <= 9; f++) {
+      const at = track.frames.get(f)!
+      assert.ok(
+        Math.abs(at.rect.x - (100 + f * 30)) <= 4,
+        `frame ${f} smoothed to x=${at.rect.x}, expected near ${100 + f * 30}`
+      )
+    }
+
+    // and the single bad reading is still pulled back in
+    assert.ok(Math.abs((track.frames.get(6) as { rect: Rect }).rect.x - 280) <= 4)
+  })
+
+  it("still pins a stationary mark", () => {
+    const frames: Observation[][] = []
+    for (let f = 0; f < 12; f++) frames.push([seen(box(f === 5 ? 207 : 200, 200))])
+
+    const result = buildTracks(frames, { minPersistence: 4 })
+    const track = result.tracks[0]!
+    assert.equal(track.frames.get(5)?.rect.x, 200, "an outlier survived on a static mark")
+  })
+})
