@@ -1,8 +1,10 @@
 import {
+  coverage,
   createPlanner,
   renderFrame,
   type AlphaMap,
   type ClipPlan,
+  type Coverage,
   type Frame,
   type PlanOptions,
 } from "@gvowr/engine"
@@ -30,7 +32,16 @@ export interface ProcessResult {
   readonly plan: ClipPlan
   readonly framesWritten: number
   readonly framesCorrected: number
+  /** Frames a track covered but deliberately declined to correct, e.g. occlusion. */
   readonly framesLeftUntouched: number
+  /**
+   * Frames inside the tracked span that no track reached at all.
+   *
+   * Distinct from `framesLeftUntouched`, which is a decision. These are frames the
+   * mark was almost certainly on and the plan lost, so they leave the tool with
+   * nothing to say — which is exactly why they have to be said out loud.
+   */
+  readonly coverage: Coverage
   readonly audioCopied: boolean
 }
 
@@ -79,6 +90,7 @@ export async function processVideo(
     framesWritten: encoded.framesWritten,
     framesCorrected: corrected,
     framesLeftUntouched: untouched,
+    coverage: coverage(plan.tracks),
     audioCopied: encoded.audioCopied,
   }
 }

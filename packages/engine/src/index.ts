@@ -64,6 +64,7 @@ export {
   type TrackOptions,
 } from "./track.ts"
 export {
+  coverage,
   createPlanner,
   planClip,
   planClipAsync,
@@ -71,6 +72,8 @@ export {
   type ClipPlanner,
   type ClipDiagnostics,
   type ClipPlan,
+  type Coverage,
+  type FrameRange,
   type DetectionMode,
   type FrameReport,
   type PlanOptions,

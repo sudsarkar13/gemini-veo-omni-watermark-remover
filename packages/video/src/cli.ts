@@ -102,6 +102,7 @@ export async function main(argv: readonly string[]): Promise<number> {
             framesWritten: result.framesWritten,
             framesCorrected: result.framesCorrected,
             framesLeftUntouched: result.framesLeftUntouched,
+            coverage: result.coverage,
             audioCopied: result.audioCopied,
           },
           null,
@@ -122,8 +123,20 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (result.framesLeftUntouched > 0) {
       process.stdout.write(
         `  note: ${result.framesLeftUntouched} frame(s) left untouched where the mark ` +
-          `could not be located\n`
+          `was covered\n`
       )
+    }
+    // Said plainly and last, because it is the one number that means the output is
+    // not clean. Burying it would make the summary above a lie by omission.
+    if (result.coverage.framesUncovered > 0) {
+      const ranges = result.coverage.gaps
+        .map((gap) => (gap.from === gap.to ? `${gap.from}` : `${gap.from}-${gap.to}`))
+        .join(", ")
+      process.stdout.write(
+        `  WARNING: ${result.coverage.framesUncovered} frame(s) still carry the mark. ` +
+          `The track was lost at ${ranges} and nothing was applied there.\n`
+      )
+      return 2
     }
     return 0
   }

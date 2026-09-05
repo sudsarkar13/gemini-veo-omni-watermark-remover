@@ -413,6 +413,73 @@ export interface RenderReport {
 }
 
 /**
+ * Which frames the plan actually accounts for, and which it silently does not.
+ *
+ * A frame belonging to no track at all renders untouched and, until this existed, was
+ * counted nowhere: `renderFrame` reports what it applied and what it deliberately
+ * skipped, and a frame it was never asked about is neither. A clip could finish with
+ * a run of frames still carrying the mark and be reported as clean.
+ *
+ * Gaps are only counted *between* the first and last frame any track covers. Outside
+ * that span there is no evidence the mark was ever present, and calling those frames
+ * misses would invent a failure as readily as ignoring them hides one. The span is
+ * reported alongside so the caller can say what was actually examined rather than
+ * implying the whole clip was.
+ */
+export interface FrameRange {
+  readonly from: number
+  /** Inclusive. */
+  readonly to: number
+}
+
+export interface Coverage {
+  /** First frame covered by any track, or -1 when the plan is empty. */
+  readonly firstFrame: number
+  /** Last frame covered by any track, or -1 when the plan is empty. */
+  readonly lastFrame: number
+  /** Runs inside the span that no track covers. The mark was there and we lost it. */
+  readonly gaps: FrameRange[]
+  readonly framesUncovered: number
+}
+
+export function coverage(tracks: readonly WatermarkTrack[]): Coverage {
+  if (tracks.length === 0) {
+    return { firstFrame: -1, lastFrame: -1, gaps: [], framesUncovered: 0 }
+  }
+
+  let firstFrame = Number.POSITIVE_INFINITY
+  let lastFrame = Number.NEGATIVE_INFINITY
+  for (const track of tracks) {
+    if (track.firstFrame < firstFrame) firstFrame = track.firstFrame
+    if (track.lastFrame > lastFrame) lastFrame = track.lastFrame
+  }
+
+  const covered = new Set<number>()
+  for (const track of tracks) {
+    for (const index of track.frames.keys()) covered.add(index)
+  }
+
+  const gaps: FrameRange[] = []
+  let runStart: number | null = null
+  for (let index = firstFrame; index <= lastFrame; index++) {
+    if (covered.has(index)) {
+      if (runStart !== null) {
+        gaps.push({ from: runStart, to: index - 1 })
+        runStart = null
+      }
+      continue
+    }
+    if (runStart === null) runStart = index
+  }
+  if (runStart !== null) gaps.push({ from: runStart, to: lastFrame })
+
+  let framesUncovered = 0
+  for (const gap of gaps) framesUncovered += gap.to - gap.from + 1
+
+  return { firstFrame, lastFrame, gaps, framesUncovered }
+}
+
+/**
  * Pass 3: apply the plan to one frame, mutating it in place.
  *
  * Occluded frames are deliberately left alone. Leaving a mark visible on a handful of
