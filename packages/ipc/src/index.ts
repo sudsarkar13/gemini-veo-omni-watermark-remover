@@ -69,8 +69,18 @@ export interface JobResult {
   readonly tracksFound: number
   readonly tracksRejected: number
   readonly framesCorrected: number
-  /** Frames where the mark could not be located and were left alone. */
+  /** Frames a track covered but deliberately declined to correct, e.g. occlusion. */
   readonly framesLeftUntouched: number
+  /**
+   * Frames inside the tracked span that no track reached, so nothing was applied and
+   * the mark is still on them. The one number that means the output is not clean.
+   */
+  readonly framesUncovered: number
+  /** Where those frames are, so the timeline can show them rather than total them. */
+  readonly uncoveredRanges: readonly { readonly from: number; readonly to: number }[]
+  /** First and last frame any track covered, or -1 when nothing was tracked. */
+  readonly trackedFrom: number
+  readonly trackedTo: number
   readonly audioCopied: boolean
   readonly elapsedMs: number
 }

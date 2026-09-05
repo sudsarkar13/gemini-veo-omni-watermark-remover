@@ -239,12 +239,14 @@ export class JobQueue {
       // Three distinct successful outcomes, kept distinct. Reporting a clip with
       // skipped frames as plainly "done" would hide exactly what the user needs to
       // check, and finding no mark is information, not failure.
+      //
+      // Frames no track reached count here too. They are the more serious of the two
+      // — a deliberate skip is a decision we can explain, an uncovered frame is one
+      // we lost — and calling a clip that still carries the mark "done" is the exact
+      // dishonesty this state exists to prevent.
+      const incomplete = result.framesLeftUntouched > 0 || result.framesUncovered > 0
       const state: JobState =
-        result.tracksFound === 0
-          ? "no-mark-found"
-          : result.framesLeftUntouched > 0
-            ? "done-with-skips"
-            : "done"
+        result.tracksFound === 0 ? "no-mark-found" : incomplete ? "done-with-skips" : "done"
 
       setMediaOutput(id, output)
       this.#update(id, { state, progress: null, result: { ...result, outputPath: output } })

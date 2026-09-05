@@ -97,6 +97,7 @@ export function ClipDetail({
             media={media}
             duration={duration || (job.info?.durationSeconds ?? 0)}
             currentTime={currentTime}
+            frameCount={job.info?.frameCount ?? 0}
             onSeek={setCurrentTime}
             result={job.result}
           />
@@ -126,6 +127,29 @@ export function ClipDetail({
                 <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] opacity-90">
                   {job.error}
                 </pre>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {job.result && job.result.framesUncovered > 0 && (
+            <Alert className="border-warning/40 bg-warning/5 text-foreground">
+              <AlertTriangle className="size-4 text-warning" />
+              <AlertTitle className="text-warning">
+                {job.result.framesUncovered} frame
+                {job.result.framesUncovered === 1 ? "" : "s"} still carry the watermark
+              </AlertTitle>
+              <AlertDescription className="text-muted-foreground">
+                The mark was tracked across most of the clip but lost at{" "}
+                {job.result.uncoveredRanges
+                  .map((range) =>
+                    range.from === range.to
+                      ? `frame ${range.from}`
+                      : `frames ${range.from}–${range.to}`
+                  )
+                  .join(", ")}
+                , and nothing was applied there — they are marked in orange on the
+                timeline. Full-frame sweep in Advanced searches more often and usually
+                closes a gap like this.
               </AlertDescription>
             </Alert>
           )}

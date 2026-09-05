@@ -34,6 +34,10 @@ export interface WorkerResult {
   readonly tracksRejected: number
   readonly framesCorrected: number
   readonly framesLeftUntouched: number
+  readonly framesUncovered: number
+  readonly uncoveredRanges: readonly { readonly from: number; readonly to: number }[]
+  readonly trackedFrom: number
+  readonly trackedTo: number
   readonly audioCopied: boolean
   readonly elapsedMs: number
 }
@@ -75,6 +79,10 @@ process.on("message", (message: StartMessage) => {
           tracksRejected: result.plan.diagnostics.tracksRejected,
           framesCorrected: result.framesCorrected,
           framesLeftUntouched: result.framesLeftUntouched,
+          framesUncovered: result.coverage.framesUncovered,
+          uncoveredRanges: result.coverage.gaps,
+          trackedFrom: result.coverage.firstFrame,
+          trackedTo: result.coverage.lastFrame,
           audioCopied: result.audioCopied,
           elapsedMs: Date.now() - started,
         },

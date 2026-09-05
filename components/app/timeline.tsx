@@ -23,6 +23,7 @@ export function Timeline({
   media,
   duration,
   currentTime,
+  frameCount,
   onSeek,
   result,
 }: {
@@ -30,6 +31,8 @@ export function Timeline({
   media: ClipMedia
   duration: number
   currentTime: number
+  /** Total frames in the clip, so detection ranges land where they actually are. */
+  frameCount: number
   onSeek: (seconds: number) => void
   result: JobResult | null
 }) {
@@ -47,8 +50,12 @@ export function Timeline({
   )
 
   const playheadPercent = duration > 0 ? (currentTime / duration) * 100 : 0
-  const totalFrames = result ? result.framesCorrected + result.framesLeftUntouched : 0
-  const skippedFraction = totalFrames > 0 ? result!.framesLeftUntouched / totalFrames : 0
+
+  // Frame indices to percentages of the clip. The lane used to draw two blocks sized
+  // by a ratio of counts, which put the gaps wherever the arithmetic landed rather
+  // than where they are — a picture that looks informative and is not.
+  const span = frameCount > 0 ? frameCount : 1
+  const percent = (frame: number): number => (frame / span) * 100
 
   return (
     <div
@@ -119,17 +126,28 @@ export function Timeline({
         )}
 
         {result && (
-          <div className="flex h-2 w-full overflow-hidden">
-            <div
-              className="bg-track-corner"
-              style={{ width: `${(1 - skippedFraction) * 100}%` }}
-              title={`${result.framesCorrected} frames corrected`}
-            />
-            <div
-              className="bg-track-occluded"
-              style={{ width: `${skippedFraction * 100}%` }}
-              title={`${result.framesLeftUntouched} frames left untouched`}
-            />
+          <div className="relative h-2 w-full overflow-hidden bg-muted/40">
+            {result.trackedFrom >= 0 && (
+              <div
+                className="absolute inset-y-0 bg-track-corner"
+                style={{
+                  left: `${percent(result.trackedFrom)}%`,
+                  width: `${percent(result.trackedTo - result.trackedFrom + 1)}%`,
+                }}
+                title={`Tracked across frames ${result.trackedFrom}–${result.trackedTo}`}
+              />
+            )}
+            {result.uncoveredRanges.map((range) => (
+              <div
+                key={`${range.from}-${range.to}`}
+                className="absolute inset-y-0 bg-warning"
+                style={{
+                  left: `${percent(range.from)}%`,
+                  width: `${Math.max(0.4, percent(range.to - range.from + 1))}%`,
+                }}
+                title={`Frames ${range.from}–${range.to} still carry the mark`}
+              />
+            ))}
           </div>
         )}
 
@@ -147,6 +165,9 @@ export function Timeline({
             <Legend className="bg-track-occluded">
               Left untouched {result.framesLeftUntouched}
             </Legend>
+          )}
+          {result.framesUncovered > 0 && (
+            <Legend className="bg-warning">Still marked {result.framesUncovered}</Legend>
           )}
           <span className="ml-auto">
             {result.tracksFound} watermark{result.tracksFound === 1 ? "" : "s"} tracked
