@@ -17,7 +17,7 @@ import {
 } from "./detect.ts"
 import { cornerCandidates, hasCalibratedProfile } from "./geometry.ts"
 import { buildTracks, type Observation, type TrackOptions } from "./track.ts"
-import type { AlphaMap, Frame, Rect, WatermarkTrack } from "./types.ts"
+import type { AlphaMap, Frame, ManualMark, Rect, WatermarkTrack } from "./types.ts"
 import { verifyReversibility, type VerifyOptions } from "./verify.ts"
 
 /**
@@ -59,6 +59,14 @@ export interface PlanOptions extends SearchOptions, TrackOptions, VerifyOptions 
    * act as discovering one somewhere new and must not be held to the same bar.
    */
   readonly reacquireFrames?: number
+  /**
+   * Regions the user pointed at, each over a range of frames.
+   *
+   * Searched at the tracking bar rather than the discovery bar — someone looked at
+   * the frame and said the mark is there, which is stronger evidence than a
+   * correlation peak — and kept through consolidation however brief they are.
+   */
+  readonly manualMarks?: readonly ManualMark[]
 }
 
 export interface FrameReport {
@@ -148,6 +156,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
   const trackRadius = options.trackRadius ?? DEFAULT_TRACK_RADIUS
   const discoveryThreshold = options.discoveryThreshold ?? DEFAULT_DISCOVERY_THRESHOLD
   const reacquireFrames = options.reacquireFrames ?? DEFAULT_REACQUIRE_FRAMES
+  const manualMarks = options.manualMarks ?? []
 
   const started = Date.now()
   const perFrame: Observation[][] = []
@@ -210,6 +219,40 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
       { ...options, sizes: options.sizes ?? searchSizes }
     )
 
+    // Regions the user drew for this frame are searched alongside whatever the
+    // detector proposed, at the tracking bar. Their rect is a starting point, not a
+    // verdict: `polish` still settles the exact position and the verifier still
+    // measures the alpha, because a drawn box is a claim about *where* the mark is,
+    // not about how strongly it was composited.
+    const asserted = new Set<Candidate>()
+    for (const mark of manualMarks) {
+      if (index < mark.fromFrame || index > mark.toFrame) continue
+      const template = nearestTemplate(templates as SizedTemplate[], mark.rect.width)
+      if (!template) continue
+      const radius = Math.max(4, Math.round(mark.rect.width * 0.25))
+      const best = searchWindow(
+        analysis,
+        [template],
+        {
+          x: mark.rect.x - radius,
+          y: mark.rect.y - radius,
+          width: radius * 2,
+          height: radius * 2,
+        },
+        { ...options, sizes: options.sizes ?? searchSizes }
+      )
+      const proposal = best ?? {
+        rect: mark.rect,
+        score: 1,
+        spatial: 1,
+        gradient: 1,
+        variance: 0,
+      }
+      if (candidates.some((c) => overlap(c.rect, proposal.rect) > 0.3)) continue
+      asserted.add(proposal)
+      candidates.push(proposal)
+    }
+
     const observations: Observation[] = []
     for (const candidate of candidates) {
       const scaled = scaleAlphaMap(map, candidate.rect.width, candidate.rect.height)
@@ -229,6 +272,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
         rect: best.rect,
         alpha: best.verdict.gain,
         confidence: candidate.score,
+        ...(asserted.has(candidate) ? { manual: true } : {}),
       })
     }
 

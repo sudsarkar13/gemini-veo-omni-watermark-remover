@@ -19,6 +19,8 @@ export interface Observation {
   readonly rect: Rect
   readonly alpha: number
   readonly confidence: number
+  /** True when this came from a region the user pointed at rather than a search. */
+  readonly manual?: boolean
 }
 
 export interface MutableTrack {
@@ -29,6 +31,8 @@ export interface MutableTrack {
   lastFrame: number
   /** Consecutive frames since this track was last matched to an observation. */
   misses: number
+  /** Set once any observation in this track came from a user-drawn region. */
+  manual: boolean
 }
 
 export interface TrackOptions {
@@ -170,6 +174,7 @@ export function ingestFrame(
       best.frames.set(frameIndex, { ...observation, state: "detected" })
       best.lastFrame = frameIndex
       best.misses = 0
+      if (observation.manual === true) best.manual = true
     } else {
       const track: MutableTrack = {
         id: `track-${tracks.length + 1}`,
@@ -178,6 +183,7 @@ export function ingestFrame(
         firstFrame: frameIndex,
         lastFrame: frameIndex,
         misses: 0,
+        manual: observation.manual === true,
       }
       tracks.push(track)
     }
@@ -227,7 +233,14 @@ export function consolidate(
   let rejected = 0
 
   for (const track of tracks) {
-    if (track.frames.size < requiredPersistence(track, minPersistence, frameCount)) {
+    // Persistence is a stand-in for corroboration, and a region the user drew is
+    // corroboration of a better kind than any amount of repetition. Discarding it for
+    // being brief would make the manual tool useless exactly where it is needed: on
+    // marks too fleeting for the detector to have trusted on its own.
+    if (
+      !track.manual &&
+      track.frames.size < requiredPersistence(track, minPersistence, frameCount)
+    ) {
       rejected++
       continue
     }

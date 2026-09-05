@@ -279,3 +279,24 @@ describe("position smoothing", () => {
     assert.equal(track.frames.get(5)?.rect.x, 200, "an outlier survived on a static mark")
   })
 })
+
+describe("user-drawn regions", () => {
+  it("keeps a track the user asserted however brief it is", () => {
+    // Persistence stands in for corroboration, and a region someone drew is
+    // corroboration of a better kind. Discarding it for being brief would make the
+    // manual tool useless exactly where it is needed.
+    const frames: Observation[][] = Array.from({ length: 20 }, () => [])
+    for (const f of [10, 11]) frames[f] = [{ ...seen(box(300, 300)), manual: true }]
+
+    const result = buildTracks(frames, { minPersistence: 8 })
+    assert.equal(result.tracks.length, 1)
+    assert.equal(result.rejected, 0)
+  })
+
+  it("does not extend that licence to anything else in the clip", () => {
+    const frames: Observation[][] = Array.from({ length: 20 }, () => [])
+    for (const f of [10, 11]) frames[f] = [seen(box(300, 300))]
+
+    assert.equal(buildTracks(frames, { minPersistence: 8 }).tracks.length, 0)
+  })
+})

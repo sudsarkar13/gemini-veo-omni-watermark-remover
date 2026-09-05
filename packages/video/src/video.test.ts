@@ -9,6 +9,7 @@ import { blend, scaleAlphaMap, syntheticDiamond, type Frame, type Rect } from "@
 import { decodeFrames } from "./decode.ts"
 import { encodeFrames } from "./encode.ts"
 import { resolveBinaries } from "./ffmpeg.ts"
+import { parseManualMark } from "./cli.ts"
 import { parseRational, probe } from "./probe.ts"
 import { processVideo } from "./process.ts"
 
@@ -204,3 +205,30 @@ async function regionError(path: string, frameIndex: number): Promise<number> {
   }
   throw new Error(`frame ${frameIndex} not found in ${path}`)
 }
+
+describe("parseManualMark", () => {
+  it("reads a region and the frames it applies to", () => {
+    assert.deepEqual(parseManualMark("793,639,50,50@235-239"), {
+      rect: { x: 793, y: 639, width: 50, height: 50 },
+      fromFrame: 235,
+      toFrame: 239,
+    })
+  })
+
+  it("tolerates spacing", () => {
+    assert.deepEqual(parseManualMark(" 10 , 20 , 30 , 40 @ 0 - 5 "), {
+      rect: { x: 10, y: 20, width: 30, height: 40 },
+      fromFrame: 0,
+      toFrame: 5,
+    })
+  })
+
+  it("refuses anything it cannot read rather than guessing", () => {
+    // A misread region removes pixels somewhere nobody asked for.
+    assert.throws(() => parseManualMark("793,639,50@235-239"), /x,y,w,h/)
+    assert.throws(() => parseManualMark("793,639,50,50"), /x,y,w,h/)
+    assert.throws(() => parseManualMark("a,b,c,d@1-2"), /x,y,w,h/)
+    assert.throws(() => parseManualMark("1,2,0,4@1-2"), /positive/)
+    assert.throws(() => parseManualMark("1,2,3,4@5-1"), /backwards/)
+  })
+})

@@ -32,6 +32,27 @@ export interface AlphaMap {
   readonly data: Float32Array
 }
 
+/**
+ * A region the user has pointed at, over a range of frames.
+ *
+ * Auto-detection cannot be relied on to find every mark: a roaming one can be small,
+ * faint, or visible for only a handful of frames, and the bar for admitting a mark
+ * nobody asked about has to stay high or ordinary content gets holes cut in it. A
+ * region the user drew is different evidence entirely — someone looked at the frame
+ * and said the mark is there — so it seeds the search directly instead of competing
+ * for discovery.
+ *
+ * It is a prior, not a licence to subtract. The region still has to invert cleanly
+ * into its surroundings before anything is removed, because the alpha has to be
+ * measured from somewhere and guessing it is how you get a hole instead of a repair.
+ */
+export interface ManualMark {
+  readonly rect: Rect
+  /** Inclusive frame range this region applies to. */
+  readonly fromFrame: number
+  readonly toFrame: number
+}
+
 export interface BlendOptions {
   /** Intensity multiplier applied to every alpha sample. Defaults to 1. */
   readonly gain?: number

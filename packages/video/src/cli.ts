@@ -2,7 +2,13 @@ import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 
-import { defaultTemplate, loadTemplatePpm, syntheticDiamond, type AlphaMap } from "@gvowr/engine"
+import {
+  defaultTemplate,
+  loadTemplatePpm,
+  syntheticDiamond,
+  type AlphaMap,
+  type ManualMark,
+} from "@gvowr/engine"
 
 import { probe } from "./probe.ts"
 import { processVideo } from "./process.ts"
@@ -18,6 +24,9 @@ Options:
   --template <file.ppm>   Alpha template capture (default: measured Veo capture)
   --size <n>              Use the synthetic stand-in at this size instead
   --mode <auto|corner|sweep>   Detection strategy (auto)
+  --manual <x,y,w,h@from-to>   Region the mark occupies over a frame range.
+                          Repeatable. Seeds the search where you say the mark is;
+                          tracking follows it from there.
   --sweep-interval <n>    Frames between full-frame sweeps (15)
   --crf <n>               Quality, lower is better (14)
   --preset <name>         x264 preset (slow)
@@ -33,6 +42,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       template: { type: "string" },
       size: { type: "string" },
       mode: { type: "string" },
+      manual: { type: "string", multiple: true },
       "sweep-interval": { type: "string" },
       crf: { type: "string" },
       preset: { type: "string" },
@@ -76,6 +86,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
     const result = await processVideo(resolve(input), resolve(output), template, {
       mode: parseMode(values.mode),
+      ...(values.manual ? { manualMarks: values.manual.map(parseManualMark) } : {}),
       ...(values["sweep-interval"] ? { sweepInterval: Number(values["sweep-interval"]) } : {}),
       ...(values.crf ? { crf: Number(values.crf) } : {}),
       ...(values.preset ? { preset: values.preset } : {}),
@@ -143,6 +154,28 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   process.stderr.write(`unknown command: ${command}\n\n${USAGE}`)
   return 1
+}
+
+/** `x,y,w,h@from-to` — the region, then the inclusive frame range it applies to. */
+export function parseManualMark(text: string): ManualMark {
+  const [box, range] = text.split("@")
+  if (!box || !range) throw new Error(`manual region must be x,y,w,h@from-to, got "${text}"`)
+
+  const parts = box.split(",").map((p) => Number(p.trim()))
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) {
+    throw new Error(`manual region must be x,y,w,h@from-to, got "${text}"`)
+  }
+  const [x, y, width, height] = parts as [number, number, number, number]
+  if (width <= 0 || height <= 0) throw new Error(`manual region size must be positive, got "${text}"`)
+
+  const bounds = range.split("-").map((p) => Number(p.trim()))
+  if (bounds.length !== 2 || bounds.some((n) => !Number.isInteger(n))) {
+    throw new Error(`manual region range must be from-to, got "${text}"`)
+  }
+  const [fromFrame, toFrame] = bounds as [number, number]
+  if (toFrame < fromFrame) throw new Error(`manual region range runs backwards: "${text}"`)
+
+  return { rect: { x, y, width, height }, fromFrame, toFrame }
 }
 
 async function loadTemplate(path: string | undefined, size: string | undefined): Promise<AlphaMap> {
