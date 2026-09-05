@@ -456,6 +456,44 @@ stand-in means nothing. Detection now uses a separate, much higher bar to *start
 track from a full-frame sweep (`DEFAULT_DISCOVERY_THRESHOLD`) than to keep following
 one, because those two decisions carry very different costs.
 
+That higher bar then caused a fault of its own. Following was seeded from the previous
+frame's observations, so one frame the verifier declined erased the tracker's memory
+and the mark could only return through a sweep — at the discovery bar, which busy
+footage does not reach. Sixteen frames kept their watermark as a result. A place the
+mark has just been is a prior, so locations now stay searchable for a bounded window
+after their last sighting (`reacquireFrames`).
+
+### How removal quality is measured
+
+Two obvious metrics are both wrong, and each sent this project chasing a phantom:
+
+- **Brightness against a surrounding ring.** Content moving through the region moves
+  the ring, so the number reflects the footage rather than the residue.
+- **Correlation with the mark's shape.** Scale-free, so against a near-black
+  background a residue of one level scores as high as a visible mark.
+
+What works is the **least-squares amplitude of the template shape in the region**,
+reported in 8-bit levels, **measured alongside unmarked control regions of the same
+clip**. Ordinary content correlates with a diamond too; without controls there is no
+separating what we left behind from what was always there. On the calibration clip:
+
+| Region | Source | Cleaned |
+| --- | --- | --- |
+| The mark | 235.1 | 12.9 |
+| Control, 160 px left | 36.4 | 36.4 |
+| Control, 160 px up | 20.9 | 20.9 |
+| Control, diagonal | 28.8 | 28.8 |
+
+The mark's site ends up quieter than ordinary content, and the controls are unchanged
+to one decimal place — nothing outside the mark was touched.
+
+**Per-frame alpha was left alone deliberately.** The estimate is 1.002 on
+well-conditioned frames and wanders 0.75–1.22 on busy ones, which looks like a case
+for a single clip-wide value. Measured against a confidence-weighted median, it
+improves the median residual (3.6 → 2.9) and worsens the tail (p95 50 → 60). Not a
+win, so the per-frame estimate with `ALPHA_STEP_CAP` stays. Recorded here so the idea
+is not re-proposed as though untested.
+
 ---
 
 ## 10. Attribution
