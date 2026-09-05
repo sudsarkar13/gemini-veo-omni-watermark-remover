@@ -2,10 +2,12 @@
 
 import { AlertTriangle, FolderOpen, Play, SearchX, Square } from "lucide-react"
 import { useState } from "react"
-import type { Job, JobOptions } from "@gvowr/ipc"
+import type { Job, JobOptions, ManualMarkInput } from "@gvowr/ipc"
 
 import { AdvancedDrawer, DEFAULT_OPTIONS } from "@/components/app/advanced-drawer"
 import { ComparePlayer } from "@/components/app/compare-player"
+import { MarkList } from "@/components/app/mark-list"
+import { MarkOverlay } from "@/components/app/mark-overlay"
 import { LiveMeters } from "@/components/app/live-meters"
 import { Preflight } from "@/components/app/preflight"
 import { Timeline } from "@/components/app/timeline"
@@ -44,6 +46,14 @@ export function ClipDetail({
   const [options, setOptions] = useState<JobOptions>(DEFAULT_OPTIONS)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(job.info?.durationSeconds ?? 0)
+  const [marks, setMarks] = useState<ManualMarkInput[]>([])
+  const [selectedMark, setSelectedMark] = useState<string | null>(null)
+  const [marking, setMarking] = useState(false)
+
+  const frameRate = job.info?.frameRate ?? 30
+  const frameCount = job.info?.frameCount ?? 0
+  const currentFrame = Math.min(Math.max(0, Math.round(currentTime * frameRate)), Math.max(0, frameCount - 1))
+  const seekToFrame = (frame: number): void => setCurrentTime(frame / frameRate)
 
   // Keyed on the output path so a finished run reloads the media and the comparison
   // shows the render that just completed rather than a stale one.
@@ -82,10 +92,31 @@ export function ClipDetail({
           <ComparePlayer
             className="min-h-0 flex-1"
             media={media}
-            frameRate={job.info?.frameRate ?? 30}
+            frameRate={frameRate}
             currentTime={currentTime}
             onTimeChange={setCurrentTime}
             onDurationChange={setDuration}
+            marking={marking}
+            onMarkingChange={setMarking}
+            canMark={!busy && job.info !== null}
+            overlay={
+              job.info ? (
+                <MarkOverlay
+                  marks={marks}
+                  selectedId={selectedMark}
+                  frameWidth={job.info.width}
+                  frameHeight={job.info.height}
+                  currentFrame={currentFrame}
+                  frameCount={frameCount}
+                  drawing={marking}
+                  onSelect={setSelectedMark}
+                  onCreate={(mark) => {
+                    setMarks((current) => [...current, mark])
+                    setSelectedMark(mark.id)
+                  }}
+                />
+              ) : null
+            }
           />
         ) : (
           <Skeleton className="min-h-0 flex-1 rounded-md" />
@@ -166,6 +197,23 @@ export function ClipDetail({
             </Alert>
           )}
 
+          <MarkList
+            marks={marks}
+            selectedId={selectedMark}
+            frameRate={frameRate}
+            frameCount={frameCount}
+            onSelect={setSelectedMark}
+            onSeek={seekToFrame}
+            onChange={(next) =>
+              setMarks((current) => current.map((mark) => (mark.id === next.id ? next : mark)))
+            }
+            onRemove={(id) => {
+              setMarks((current) => current.filter((mark) => mark.id !== id))
+              setSelectedMark((current) => (current === id ? null : current))
+            }}
+            disabled={busy}
+          />
+
           {busy && job.progress && <LiveMeters progress={job.progress} />}
 
           {!busy && job.info && job.estimate && (
@@ -200,7 +248,13 @@ export function ClipDetail({
               Cancel
             </Button>
           ) : (
-            <Button size="sm" disabled={!job.info} onClick={() => onStart(options)}>
+            <Button
+              size="sm"
+              disabled={!job.info}
+              onClick={() =>
+                onStart(marks.length > 0 ? { ...options, manualMarks: marks } : options)
+              }
+            >
               <Play className="size-4" />
               {rerunnable ? "Run again" : "Remove watermark"}
             </Button>

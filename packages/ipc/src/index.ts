@@ -128,6 +128,20 @@ export interface JobOptions {
   readonly outputDirectory?: string
   readonly region?: { x: number; y: number; width: number; height: number }
   readonly gain?: number
+  /**
+   * Regions the user drew over marks the detector did not find, each with the frames
+   * it applies to. A prior for the search, never a licence to subtract: the engine
+   * still measures the alpha by reversibility before removing anything.
+   */
+  readonly manualMarks?: readonly ManualMarkInput[]
+}
+
+export interface ManualMarkInput {
+  readonly id: string
+  readonly rect: { x: number; y: number; width: number; height: number }
+  /** Inclusive, in frames. */
+  readonly fromFrame: number
+  readonly toFrame: number
 }
 
 export interface SystemInfo {

@@ -64,6 +64,17 @@ process.on("message", (message: StartMessage) => {
         ...(message.options.crf !== undefined ? { crf: message.options.crf } : {}),
         ...(message.options.preset ? { preset: message.options.preset } : {}),
         ...(message.options.encoder ? { encoder: message.options.encoder } : {}),
+        ...(message.options.manualMarks?.length
+          ? {
+              // The renderer's id is for the interface's benefit; the engine takes the
+              // geometry and the range and nothing else.
+              manualMarks: message.options.manualMarks.map((mark) => ({
+                rect: mark.rect,
+                fromFrame: mark.fromFrame,
+                toFrame: mark.toFrame,
+              })),
+            }
+          : {}),
         onAnalyseProgress: (frame, totalFrames) => {
           send({ type: "progress", stage: "analysing", frame, totalFrames })
         },

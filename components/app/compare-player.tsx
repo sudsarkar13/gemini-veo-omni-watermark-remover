@@ -1,6 +1,6 @@
 "use client"
 
-import { Pause, Play, SkipBack, SkipForward } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, SquareDashed } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { ClipMedia } from "@gvowr/ipc"
 
@@ -38,6 +38,10 @@ export function ComparePlayer({
   currentTime,
   onTimeChange,
   onDurationChange,
+  overlay,
+  marking,
+  onMarkingChange,
+  canMark,
 }: {
   className?: string
   media: ClipMedia
@@ -45,6 +49,11 @@ export function ComparePlayer({
   currentTime: number
   onTimeChange: (seconds: number) => void
   onDurationChange: (seconds: number) => void
+  /** Drawing surface laid over the picture, sized to it exactly. */
+  overlay?: React.ReactNode
+  marking: boolean
+  onMarkingChange: (marking: boolean) => void
+  canMark: boolean
 }) {
   const beforeRef = useRef<HTMLVideoElement>(null)
   const afterRef = useRef<HTMLVideoElement>(null)
@@ -58,7 +67,9 @@ export function ComparePlayer({
   // so it becomes the split comparison the moment there is something to compare with
   // — without an effect that would re-render the players a second time.
   const [chosenMode, setChosenMode] = useState<CompareMode | null>(null)
-  const mode: CompareMode = chosenMode ?? (hasAfter ? "split" : "before")
+  // Marking always shows the original. Pointing at a mark on the cleaned copy would
+  // mean drawing over the very thing that is supposed to be gone.
+  const mode: CompareMode = marking ? "before" : (chosenMode ?? (hasAfter ? "split" : "before"))
   const setMode = setChosenMode
 
   const syncAfter = useCallback(() => {
@@ -232,6 +243,8 @@ export function ComparePlayer({
             />
           )}
 
+          {overlay}
+
           {mode === "side" && hasAfter && (
             // The two halves butt together, so on similar frames — which is the whole
             // point of the comparison — the seam is invisible without this.
@@ -264,6 +277,19 @@ export function ComparePlayer({
           {formatTimecode(currentTime)}
         </span>
 
+        {canMark && (
+          <Button
+            variant={marking ? "default" : "ghost"}
+            size="sm"
+            className="ml-2 h-7 gap-1.5 px-2 text-[11px]"
+            aria-pressed={marking}
+            onClick={() => onMarkingChange(!marking)}
+          >
+            <SquareDashed className="size-3.5" />
+            Mark
+          </Button>
+        )}
+
         <div className="ml-auto flex items-center gap-1">
           {COMPARE_MODES.map(({ value, label }) => (
             <Button
@@ -271,7 +297,7 @@ export function ComparePlayer({
               variant={mode === value ? "secondary" : "ghost"}
               size="sm"
               className="h-7 px-2 text-[11px]"
-              disabled={!hasAfter && value !== "before"}
+              disabled={marking || (!hasAfter && value !== "before")}
               onClick={() => setMode(value)}
             >
               {label}
@@ -280,10 +306,17 @@ export function ComparePlayer({
         </div>
       </div>
 
-      {!hasAfter && (
+      {marking ? (
         <p className="shrink-0 text-[11px] text-muted-foreground">
-          Showing the original. Run the removal to compare it against the cleaned version.
+          Drag on the picture to draw a box over a watermark the detector missed. It
+          applies from this frame to the end of the clip unless you narrow the range.
         </p>
+      ) : (
+        !hasAfter && (
+          <p className="shrink-0 text-[11px] text-muted-foreground">
+            Showing the original. Run the removal to compare it against the cleaned version.
+          </p>
+        )
       )}
     </div>
   )
