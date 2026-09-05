@@ -28,6 +28,27 @@ describe("ingestFrame", () => {
     assert.equal(tracks.length, 2)
   })
 
+  it("follows a mark that crosses the frame quickly", () => {
+    // Thirty pixels a frame is what a mark does when it rides an object swinging past
+    // the camera. Matching on the assumption that marks barely move makes "anywhere in
+    // the frame" mean "anywhere, as long as it stays put", and turns one roaming mark
+    // into a string of one-frame tracks that consolidation then discards.
+    const tracks: MutableTrack[] = []
+    for (let f = 0; f < 8; f++) ingestFrame(tracks, f, [seen(box(100 + f * 30, 100 + f * 12))])
+
+    assert.equal(tracks.length, 1, "the moving mark was split into separate tracks")
+    assert.equal(tracks[0]?.frames.size, 8)
+  })
+
+  it("still refuses a jump no mark could have made", () => {
+    // The gate widens with observed speed, not without limit.
+    const tracks: MutableTrack[] = []
+    for (let f = 0; f < 4; f++) ingestFrame(tracks, f, [seen(box(100 + f * 5, 100))])
+    ingestFrame(tracks, 4, [seen(box(900, 700))])
+
+    assert.equal(tracks.length, 2)
+  })
+
   it("follows two marks at once without confusing them", () => {
     // The corner mark plus a roaming one is the case that motivates the whole design.
     const tracks: MutableTrack[] = []

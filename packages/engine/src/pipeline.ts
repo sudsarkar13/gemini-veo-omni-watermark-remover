@@ -10,6 +10,7 @@ import {
   sizeTemplate,
   sweepFrame,
   DEFAULT_DISCOVERY_THRESHOLD,
+  DEFAULT_THRESHOLD,
   type Candidate,
   type SearchOptions,
   type SizedTemplate,
@@ -102,6 +103,26 @@ const DEFAULT_REACQUIRE_FRAMES = 30
 /** Cap on remembered locations, so a busy clip cannot make every frame expensive. */
 const MAX_RECENT_LOCATIONS = 8
 
+/** Search slack for a location of unknown velocity, as a fraction of the mark's size. */
+const UNKNOWN_MOTION_SLACK = 0.75
+
+/**
+ * Longest gap over which a re-sighting still says something about velocity.
+ *
+ * Across a longer absence the mark could have gone anywhere and come back; dividing
+ * the displacement by the gap would invent a slow drift that was never observed.
+ */
+const MAX_VELOCITY_GAP = 4
+
+/** A place the mark has been, with what is known about how it was moving. */
+interface RecentLocation {
+  rect: Rect
+  /** Pixels per frame, or null before a second sighting has established it. */
+  velocity: { x: number; y: number } | null
+  sightings: number
+  lastSeen: number
+}
+
 /**
  * Incremental planner: feed it one frame at a time, then ask for the plan.
  *
@@ -147,7 +168,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
    * on one frame and could not be re-acquired for another sixteen, at a location we
    * had been tracking confidently a moment earlier.
    */
-  let recent: { rect: Rect; lastSeen: number }[] = []
+  let recent: RecentLocation[] = []
   let templates: SizedTemplate[] | null = null
   let searchSizes: readonly number[] = []
 
@@ -173,8 +194,19 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
       analysis,
       map,
       templates as SizedTemplate[],
-      recent.map((entry) => entry.rect),
-      { shouldSweep, mode, trackRadius, width, height, discoveryThreshold },
+      // Search where each location is heading, not where it was last seen. A mark
+      // crossing the frame at thirty pixels a frame leaves an eight-pixel window
+      // behind on the very next one.
+      recent.map((entry) => predictedSearch(entry, index)),
+      {
+        shouldSweep,
+        mode,
+        trackRadius,
+        width,
+        height,
+        discoveryThreshold,
+        trackingThreshold: options.threshold ?? DEFAULT_THRESHOLD,
+      },
       { ...options, sizes: options.sizes ?? searchSizes }
     )
 
@@ -203,12 +235,30 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
     perFrame.push(observations)
 
     for (const observation of observations) {
-      const known = recent.find((entry) => overlap(entry.rect, observation.rect) > 0.3)
+      const known =
+        recent.find((entry) => overlap(entry.rect, observation.rect) > 0.3) ??
+        recent.find(
+          (entry) => overlap(predictedSearch(entry, index).rect, observation.rect) > 0.3
+        )
       if (known) {
+        const gap = index - known.lastSeen
+        // Velocity survives a gap. Re-deriving it only from consecutive sightings
+        // means any frame the verifier declines leaves the location claiming to know
+        // nothing about its own motion, and a mark that has sat still for seventy
+        // frames casts about as widely as one just discovered — which is how the
+        // corner track stepped onto a passing highlight and walked off across the
+        // frame.
+        if (gap > 0 && gap <= MAX_VELOCITY_GAP) {
+          known.velocity = {
+            x: (observation.rect.x - known.rect.x) / gap,
+            y: (observation.rect.y - known.rect.y) / gap,
+          }
+        }
         known.rect = observation.rect
         known.lastSeen = index
+        known.sightings++
       } else {
-        recent.push({ rect: observation.rect, lastSeen: index })
+        recent.push({ rect: observation.rect, velocity: null, sightings: 1, lastSeen: index })
       }
     }
     recent = recent
@@ -370,6 +420,37 @@ function residualEdgeEnergy(
   return count > 0 ? total / count : Number.POSITIVE_INFINITY
 }
 
+/**
+ * A remembered location advanced by its own motion, with a window that grows to match.
+ *
+ * A stationary mark needs a few pixels of slack; one travelling across the frame needs
+ * its whole displacement, or following it costs a fresh full-frame discovery every
+ * single frame — which the discovery bar will usually refuse.
+ */
+function predictedSearch(entry: RecentLocation, index: number): { rect: Rect; slack: number } {
+  const ahead = Math.max(1, index - entry.lastSeen)
+
+  // Nothing is known about a location's motion until it has been seen twice, and
+  // assuming it is stationary is how a roaming mark gets lost on the very frame after
+  // it is found — the window is too small to catch the second sighting that would
+  // have revealed the velocity. The mark's own size is the honest scale for a step it
+  // might plausibly have taken. Exactly one frame per newly found location pays this.
+  if (entry.velocity === null || entry.sightings < 2) {
+    return { rect: entry.rect, slack: Math.round(entry.rect.width * UNKNOWN_MOTION_SLACK) }
+  }
+
+  const { x: vx, y: vy } = entry.velocity
+  return {
+    rect: {
+      ...entry.rect,
+      x: Math.round(entry.rect.x + vx * ahead),
+      y: Math.round(entry.rect.y + vy * ahead),
+    },
+    // Half the predicted step, so a change of speed or direction still lands inside.
+    slack: Math.round(Math.hypot(vx, vy) * ahead * 0.5),
+  }
+}
+
 interface CollectContext {
   readonly shouldSweep: boolean
   readonly mode: DetectionMode
@@ -377,6 +458,8 @@ interface CollectContext {
   readonly width: number
   readonly height: number
   readonly discoveryThreshold: number
+  /** Score a followed mark must reach in its expected place before we look wider. */
+  readonly trackingThreshold: number
 }
 
 /**
@@ -388,13 +471,13 @@ function collectCandidates(
   analysis: ReturnType<typeof analyseFrame>,
   map: AlphaMap,
   templates: readonly SizedTemplate[],
-  previous: readonly Rect[],
+  previous: readonly { rect: Rect; slack: number }[],
   context: CollectContext,
   options: SearchOptions
 ): Candidate[] {
   const found: Candidate[] = []
 
-  for (const rect of previous) {
+  for (const { rect, slack } of previous) {
     // Follow an established track by position only, holding its size fixed.
     //
     // Re-choosing the size every frame looks harmless but is not: a smaller template
@@ -405,17 +488,32 @@ function collectCandidates(
     const template = nearestTemplate(templates, rect.width)
     if (!template) continue
 
-    const best = searchWindow(
-      analysis,
-      [template],
-      {
-        x: rect.x - context.trackRadius,
-        y: rect.y - context.trackRadius,
-        width: context.trackRadius * 2,
-        height: context.trackRadius * 2,
-      },
-      options
-    )
+    // Look where the mark is expected first, and only cast about if it is not there.
+    //
+    // Searching the wide window outright returns the best-scoring position in it,
+    // which is not the same thing as the mark: on a busy frame some passing highlight
+    // forty pixels away outscores the real mark, the track steps onto it, and from
+    // there it wanders off across the frame. Trying the tight window first keeps a
+    // stationary mark pinned exactly as before, and the wide search only runs on the
+    // frames where following actually failed.
+    const around = (radius: number): Rect => ({
+      x: rect.x - radius,
+      y: rect.y - radius,
+      width: radius * 2,
+      height: radius * 2,
+    })
+
+    const tight = searchWindow(analysis, [template], around(context.trackRadius), options)
+    if (tight && tight.score >= context.trackingThreshold) {
+      found.push(tight)
+      continue
+    }
+
+    const wide =
+      slack > 0
+        ? searchWindow(analysis, [template], around(context.trackRadius + slack), options)
+        : null
+    const best = wide && (!tight || wide.score > tight.score) ? wide : tight
     if (best) found.push(best)
   }
 

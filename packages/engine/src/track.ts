@@ -50,6 +50,9 @@ export interface TrackOptions {
   readonly positionWindow?: number
 }
 
+/** Match gate for a track of unknown velocity, as a fraction of the mark's size. */
+const UNKNOWN_MOTION_GATE = 0.75
+
 const DEFAULTS = {
   matchRadius: 24,
   missTolerance: 8,
@@ -67,6 +70,50 @@ function distance(a: Rect, b: Rect): number {
   const ca = centre(a)
   const cb = centre(b)
   return Math.hypot(ca.x - cb.x, ca.y - cb.y)
+}
+
+/**
+ * Per-frame velocity from a track's last two sightings, in pixels.
+ *
+ * Zero for a corner mark, and that is the case the defaults were tuned on — which is
+ * why a mark travelling thirty pixels a frame could be detected on individual frames
+ * and still never form a track. A mark free to appear anywhere is free to move, and
+ * matching it on the assumption that it barely does makes "anywhere in the frame" mean
+ * "anywhere, as long as it stays put".
+ */
+export function velocityOf(track: {
+  frames: ReadonlyMap<number, TrackedFrame>
+  lastFrame: number
+}): { x: number; y: number } {
+  const last = track.frames.get(track.lastFrame)
+  if (!last) return { x: 0, y: 0 }
+
+  let previousIndex = -1
+  for (const index of track.frames.keys()) {
+    if (index < track.lastFrame && index > previousIndex) previousIndex = index
+  }
+  const previous = previousIndex >= 0 ? track.frames.get(previousIndex) : undefined
+  if (!previous) return { x: 0, y: 0 }
+
+  const gap = track.lastFrame - previousIndex
+  const a = centre(previous.rect)
+  const b = centre(last.rect)
+  return { x: (b.x - a.x) / gap, y: (b.y - a.y) / gap }
+}
+
+/** Where a track is expected to be `ahead` frames after its last sighting. */
+export function predictRect(
+  track: { frames: ReadonlyMap<number, TrackedFrame>; lastFrame: number },
+  ahead: number
+): Rect | null {
+  const last = track.frames.get(track.lastFrame)
+  if (!last) return null
+  const v = velocityOf(track)
+  return {
+    ...last.rect,
+    x: Math.round(last.rect.x + v.x * ahead),
+    y: Math.round(last.rect.y + v.y * ahead),
+  }
 }
 
 /**
@@ -97,8 +144,22 @@ export function ingestFrame(
       const last = track.frames.get(track.lastFrame)
       if (!last) continue
 
-      const d = distance(last.rect, observation.rect)
-      if (d <= matchRadius && d < bestDistance) {
+      // Compare against where the track was heading, not where it was last seen, and
+      // widen the gate by how fast it is going. A tolerance that is generous for a
+      // stationary mark is nothing at all for one crossing the frame.
+      const ahead = frameIndex - track.lastFrame
+      const predicted = predictRect(track, ahead) ?? last.rect
+      const v = velocityOf(track)
+      const speed = Math.hypot(v.x, v.y)
+      // A track seen only once has no velocity to predict from, so the gate falls back
+      // to the mark's own size — the scale of a step it could plausibly have taken.
+      const unknown = track.frames.size < 2
+      const gate = unknown
+        ? matchRadius + last.rect.width * UNKNOWN_MOTION_GATE
+        : matchRadius + speed * Math.max(1, ahead)
+
+      const d = distance(predicted, observation.rect)
+      if (d <= gate && d < bestDistance) {
         best = track
         bestDistance = d
       }
