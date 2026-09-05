@@ -51,6 +51,13 @@ export interface PlanOptions extends SearchOptions, TrackOptions, VerifyOptions 
    * `DEFAULT_DISCOVERY_THRESHOLD`; lower it only with a fixture that justifies it.
    */
   readonly discoveryThreshold?: number
+  /**
+   * How long a location keeps being searched after the mark was last seen there.
+   *
+   * A place a mark has just been is a prior, so re-finding it there is not the same
+   * act as discovering one somewhere new and must not be held to the same bar.
+   */
+  readonly reacquireFrames?: number
 }
 
 export interface FrameReport {
@@ -85,6 +92,17 @@ const DEFAULT_SWEEP_INTERVAL = 15
 const DEFAULT_TRACK_RADIUS = 8
 
 /**
+ * Frames a lost location stays worth looking at.
+ *
+ * Long enough that consolidation can still bridge the gap it leaves, short enough
+ * that stale places do not accumulate. Beyond this the sweep is the way back.
+ */
+const DEFAULT_REACQUIRE_FRAMES = 30
+
+/** Cap on remembered locations, so a busy clip cannot make every frame expensive. */
+const MAX_RECENT_LOCATIONS = 8
+
+/**
  * Incremental planner: feed it one frame at a time, then ask for the plan.
  *
  * Frames arrive this way rather than as an array because a clip cannot be held in
@@ -108,6 +126,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
   const sweepInterval = options.sweepInterval ?? DEFAULT_SWEEP_INTERVAL
   const trackRadius = options.trackRadius ?? DEFAULT_TRACK_RADIUS
   const discoveryThreshold = options.discoveryThreshold ?? DEFAULT_DISCOVERY_THRESHOLD
+  const reacquireFrames = options.reacquireFrames ?? DEFAULT_REACQUIRE_FRAMES
 
   const started = Date.now()
   const perFrame: Observation[][] = []
@@ -117,7 +136,18 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
   let height = 0
   let sweeps = 0
   let index = 0
-  let previous: Rect[] = []
+  /**
+   * Where the mark has recently been, not merely where it was last frame.
+   *
+   * Following used to be seeded from the previous frame's observations alone, so a
+   * single frame the verifier declined erased the tracker's memory entirely. From
+   * then on the mark could only be found again by a full-frame sweep, which has to
+   * clear the much higher discovery bar — and on a bright, busy background it cannot.
+   * That is how sixteen frames of a real clip kept their watermark: the track broke
+   * on one frame and could not be re-acquired for another sixteen, at a location we
+   * had been tracking confidently a moment earlier.
+   */
+  let recent: { rect: Rect; lastSeen: number }[] = []
   let templates: SizedTemplate[] | null = null
   let searchSizes: readonly number[] = []
 
@@ -136,14 +166,14 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
 
     const analysis = analyseFrame(toGrayscale(frame))
     const shouldSweep =
-      mode !== "corner" && (previous.length === 0 || index % sweepInterval === 0)
+      mode !== "corner" && (recent.length === 0 || index % sweepInterval === 0)
     if (shouldSweep) sweeps++
 
     const candidates = collectCandidates(
       analysis,
       map,
       templates as SizedTemplate[],
-      previous,
+      recent.map((entry) => entry.rect),
       { shouldSweep, mode, trackRadius, width, height, discoveryThreshold },
       { ...options, sizes: options.sizes ?? searchSizes }
     )
@@ -171,7 +201,20 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
     }
 
     perFrame.push(observations)
-    previous = observations.map((o) => o.rect)
+
+    for (const observation of observations) {
+      const known = recent.find((entry) => overlap(entry.rect, observation.rect) > 0.3)
+      if (known) {
+        known.rect = observation.rect
+        known.lastSeen = index
+      } else {
+        recent.push({ rect: observation.rect, lastSeen: index })
+      }
+    }
+    recent = recent
+      .filter((entry) => index - entry.lastSeen <= reacquireFrames)
+      .sort((a, b) => b.lastSeen - a.lastSeen)
+      .slice(0, MAX_RECENT_LOCATIONS)
     reports.push({
       index,
       candidates: candidates.length,

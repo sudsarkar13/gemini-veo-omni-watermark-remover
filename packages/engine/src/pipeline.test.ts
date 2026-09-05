@@ -3,7 +3,7 @@ import { describe, it } from "node:test"
 
 import { blend } from "./blend.ts"
 import { scaleAlphaMap } from "./alpha-map.ts"
-import { planClip, renderFrame } from "./pipeline.ts"
+import { coverage, planClip, renderFrame } from "./pipeline.ts"
 import { veoDiamond48 } from "./templates.ts"
 import type { AlphaMap, Frame, Rect } from "./types.ts"
 
@@ -107,6 +107,61 @@ describe("planClip", () => {
     renderFrame(frames[8] as Frame, plan, 8, mark)
     const after = meanError(frames[8] as Frame, originals[8] as Frame, at)
     assert.ok(after < before * 0.1, `removal over black sky weak: ${before.toFixed(2)} -> ${after.toFixed(2)}`)
+  })
+
+  it("keeps following a mark through frames the verifier declines", () => {
+    // The mark is there throughout; a bright patch covers it for five frames so the
+    // verifier refuses them. Tracking used to be seeded from the previous frame's
+    // observations alone, so one refused frame erased the tracker's memory and the
+    // mark could only be found again by a sweep — at the much higher discovery bar,
+    // which busy footage does not reach. That is how sixteen frames of a real clip
+    // kept their watermark.
+    const at: Rect = { x: 120, y: 130, width: 24, height: 24 }
+    const frames = Array.from({ length: 26 }, (_, i) => {
+      const f = stamped(SIZE.width, SIZE.height, i, MARK, at, 0.8)
+      if (i >= 10 && i <= 14) {
+        for (let y = at.y - 4; y < at.y + at.height + 4; y++) {
+          for (let x = at.x - 4; x < at.x + at.width + 4; x++) {
+            const o = (y * f.width + x) * 3
+            f.data[o] = 250
+            f.data[o + 1] = 250
+            f.data[o + 2] = 250
+          }
+        }
+      }
+      return f
+    })
+
+    // A sweep interval longer than the clip: after the first frame, anything found
+    // has to be found by following, not by searching the frame again.
+    const plan = planClip(frames, MARK, { sizes: [24], minPersistence: 8, sweepInterval: 100 })
+
+    assert.equal(plan.tracks.length, 1, "the mark was dropped and re-discovered as a new track")
+    assert.equal(coverage(plan.tracks).framesUncovered, 0)
+    assert.equal(
+      plan.diagnostics.sweeps,
+      1,
+      `re-swept the frame ${plan.diagnostics.sweeps} times instead of following the mark back`
+    )
+  })
+
+  it("forgets a location once it has gone unseen for long enough", () => {
+    const at: Rect = { x: 120, y: 130, width: 24, height: 24 }
+    const frames = Array.from({ length: 20 }, (_, i) =>
+      stamped(SIZE.width, SIZE.height, i, MARK, at, 0.8)
+    )
+
+    // Nothing is ever verified, so no location is ever remembered and every frame
+    // has to fall back to a sweep. This pins the bound: memory comes from sightings.
+    const plan = planClip(frames, MARK, {
+      sizes: [24],
+      minPersistence: 8,
+      sweepInterval: 100,
+      minLiftZ: 1e6,
+    })
+
+    assert.equal(plan.tracks.length, 0)
+    assert.equal(plan.diagnostics.sweeps, frames.length)
   })
 
   it("will not start a track from a sweep candidate that is merely plausible", () => {
