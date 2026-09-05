@@ -160,6 +160,7 @@ only — never for editing region or alpha, which are per-clip by nature.
 | Compare mode | Segmented | Split | `Split` (draggable divider) · `Side-by-side` · `Before` · `After` · `Difference` (amplified delta — the honest way to inspect residue). |
 | Zoom | Slider + buttons | Fit | Fit · 100% · up to 800%. Scroll-wheel zooms at cursor. |
 | Pan | Drag | — | Space-drag or middle-drag when zoomed. |
+| Mark region | Drag on the canvas | — | Draws a box over a watermark the detector missed. Enters **Mark** mode; the pointer draws instead of panning. See §5.6. |
 | Loupe | Toggle | Off | Magnified inset locked to the active watermark region — the fastest way to judge removal quality. |
 | Frame step | Buttons + `,` / `.` | — | Previous / next frame. |
 | Playback | Button + `Space` | — | Play the processed result in place. |
@@ -178,6 +179,41 @@ rectangle.
 - Clicking a segment seeks the preview to that frame and selects the track.
 - Hovering shows a tooltip: frame number, timecode, region `x,y,w,h`, alpha, NCC score.
 - **Occluded ranges are always visible and never silently hidden** — principle 3.
+- **Frames no track reached at all** are drawn distinctly from occluded ones. A frame
+  the engine decided to leave is not the same as one it never considered, and only the
+  second means the output still carries the mark.
+- **Zoom** (`+` / `−`, scroll-wheel, or a range control) expands the timeline so
+  individual frames can be reached on a long clip. The filmstrip resolves to more
+  thumbnails as it zooms; the playhead stays centred. Fit-to-clip is always one press
+  away.
+
+### 5.6 Marking a watermark by hand
+
+Auto-detection is deliberately reluctant. Admitting a mark nobody asked about means
+altering pixels on one frame's evidence, so the bar is high — and a roaming mark that
+is small, faint, or on screen for a handful of frames will sometimes fall under it.
+Rather than lower the bar for everyone, the user can say where the mark is.
+
+| Control | Type | Behaviour |
+| --- | --- | --- |
+| Mark mode | Toggle (`M`) | While on, dragging on the preview draws a region instead of panning. |
+| Draw region | Drag | Creates a region at the current frame. Snaps to a square, since the mark is one. |
+| Region list | List | One row per region: thumbnail of the drawn area, frame range, size. |
+| Frame range | Two numeric fields + drag on timeline | Inclusive. Defaults to the current frame through the end of the clip. |
+| Nudge / resize | Arrow keys, handles | Selected region only. |
+| Delete region | `⌫` or row button | |
+
+**A drawn region is a prior, not an instruction.** It seeds the search where the user
+says the mark is; the engine still settles the exact position and still measures the
+alpha by reversibility before removing anything. A box drawn over something that is
+not an alpha composite removes nothing, and the run reports those frames as
+uncovered rather than inventing a correction — the same contract as everywhere else.
+
+**A region only has to be right where it is drawn.** The observation it produces
+enters the tracker like any other, so a mark that moves is followed from there.
+
+Regions persist with the job so a re-run keeps them, and are listed in the diagnostics
+report as counts and rectangles — never as pixels.
 
 ### 5.4 Advanced drawer
 
