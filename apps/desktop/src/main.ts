@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs"
 import { stat, writeFile } from "node:fs/promises"
-import { cpus, freemem, totalmem } from "node:os"
+import { cpus, freemem, tmpdir, totalmem } from "node:os"
 import { basename, join, normalize, resolve, sep } from "node:path"
 import { Readable } from "node:stream"
 // Default import, then destructure.
@@ -64,6 +64,20 @@ const here = __dirname
  * Must run before app.getPath("userData") is called anywhere.
  */
 app.setName("Gemini Veo Watermark Remover")
+
+/**
+ * The smoke test gets a userData directory of its own.
+ *
+ * It launches the real app, and the real app takes a single-instance lock. Sharing
+ * that lock with whatever the developer happens to have open means the test quits
+ * before it can assert anything and fails for a reason that has nothing to do with
+ * the code under test — a test that cannot run while you are using the app is a test
+ * you learn to ignore. An isolated directory also keeps it from reading or writing
+ * real settings.
+ */
+if (process.env["GVOWR_SMOKE"] === "1") {
+  app.setPath("userData", join(tmpdir(), `gvowr-smoke-${process.pid}`))
+}
 
 const isDev = !app.isPackaged
 
