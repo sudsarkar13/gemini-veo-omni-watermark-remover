@@ -105,11 +105,36 @@ export interface ClipDiagnostics {
 export interface RefusedRegion {
   readonly frame: number
   readonly rect: Rect
+  /** The drawn region this came from, when it came from one. */
+  readonly markId?: string
+}
+
+/**
+ * What became of each region the user drew.
+ *
+ * Reported rather than judged. Measurement says the two cannot be told apart
+ * automatically: on a real clip the genuine roaming mark scores 0.20 against the
+ * template while a bright rim that is not a mark at all scores 0.30, so any bar that
+ * rejects the second also rejects the first — and the first is the case hand-marking
+ * exists for. So the engine applies what verifies and hands back the numbers, and the
+ * UI shows them per region with the weak ones flagged for a human to look at.
+ */
+export interface ManualOutcome {
+  readonly markId: string
+  /** Frames where the region verified and was corrected. */
+  readonly removed: number
+  /** Frames where it was searched and refused. */
+  readonly refused: number
+  /** Median measured alpha over the frames it was accepted on, or null. */
+  readonly alpha: number | null
+  /** Median fused correlation score over those frames, or null. */
+  readonly confidence: number | null
 }
 
 export interface ClipPlan {
   readonly tracks: WatermarkTrack[]
   readonly refusals: readonly RefusedRegion[]
+  readonly manualOutcomes: readonly ManualOutcome[]
   readonly diagnostics: ClipDiagnostics
 }
 
@@ -178,6 +203,12 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
   const perFrame: Observation[][] = []
   const reports: FrameReport[] = []
   const refusals: RefusedRegion[] = []
+  const manualResults: {
+    markId: string
+    accepted: boolean
+    alpha: number
+    score: number
+  }[] = []
 
   let width = 0
   let height = 0
@@ -241,7 +272,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
     // verdict: `polish` still settles the exact position and the verifier still
     // measures the alpha, because a drawn box is a claim about *where* the mark is,
     // not about how strongly it was composited.
-    const asserted = new Set<Candidate>()
+    const asserted = new Map<Candidate, string | undefined>()
     for (const mark of manualMarks) {
       if (index < mark.fromFrame || index > mark.toFrame) continue
       const template = nearestTemplate(templates as SizedTemplate[], mark.rect.width)
@@ -266,7 +297,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
         variance: 0,
       }
       if (candidates.some((c) => overlap(c.rect, proposal.rect) > 0.3)) continue
-      asserted.add(proposal)
+      asserted.set(proposal, mark.id)
       candidates.push(proposal)
     }
 
@@ -287,8 +318,23 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
       if (!best.verdict.isComposite) {
         // A drawn region that failed is worth remembering; a correlation peak that
         // failed is just the verifier doing its job.
-        if (asserted.has(candidate)) refusals.push({ frame: index, rect: best.rect })
+        if (asserted.has(candidate)) {
+          const markId = asserted.get(candidate)
+          refusals.push({ frame: index, rect: best.rect, ...(markId ? { markId } : {}) })
+          if (markId) manualResults.push({ markId, accepted: false, alpha: 0, score: 0 })
+        }
         continue
+      }
+      if (asserted.has(candidate)) {
+        const markId = asserted.get(candidate)
+        if (markId) {
+          manualResults.push({
+            markId,
+            accepted: true,
+            alpha: best.verdict.gain,
+            score: candidate.score,
+          })
+        }
       }
       observations.push({
         rect: best.rect,
@@ -356,6 +402,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
 
     return {
       tracks,
+      manualOutcomes: summariseManual(manualResults),
       // Only the ones that stayed refused. A mark drawn on twenty frames that verified
       // on eighteen of them should not offer to invent pixels on the other two — the
       // track covers those, and interpolation is a better answer than synthesis.
@@ -723,6 +770,42 @@ export function coverage(tracks: readonly WatermarkTrack[]): Coverage {
  * frames is honest; correcting pixels we could not locate would smear the error
  * across the wrong part of the image, which is worse and much harder to notice.
  */
+/**
+ * One row per drawn region: how often it verified, and how strongly.
+ *
+ * Medians rather than means — a single frame where the mark was occluded should not
+ * drag the number the user is asked to judge.
+ */
+function summariseManual(
+  results: readonly { markId: string; accepted: boolean; alpha: number; score: number }[]
+): ManualOutcome[] {
+  const byMark = new Map<string, { alpha: number[]; score: number[]; refused: number }>()
+  for (const result of results) {
+    const entry = byMark.get(result.markId) ?? { alpha: [], score: [], refused: 0 }
+    if (result.accepted) {
+      entry.alpha.push(result.alpha)
+      entry.score.push(result.score)
+    } else {
+      entry.refused++
+    }
+    byMark.set(result.markId, entry)
+  }
+
+  const median = (values: number[]): number | null => {
+    if (values.length === 0) return null
+    const sorted = [...values].sort((a, b) => a - b)
+    return sorted[Math.floor(sorted.length / 2)] as number
+  }
+
+  return [...byMark.entries()].map(([markId, entry]) => ({
+    markId,
+    removed: entry.alpha.length,
+    refused: entry.refused,
+    alpha: median(entry.alpha),
+    confidence: median(entry.score),
+  }))
+}
+
 export function renderFrame(
   frame: Frame,
   plan: ClipPlan,

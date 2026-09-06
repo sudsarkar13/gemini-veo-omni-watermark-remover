@@ -47,6 +47,14 @@ export interface AlphaMap {
  * measured from somewhere and guessing it is how you get a hole instead of a repair.
  */
 export interface ManualMark {
+  /**
+   * The caller's own identifier, carried through untouched.
+   *
+   * The engine never interprets it; it exists so a result can be reported against the
+   * region the user actually drew rather than matched back by geometry, which stops
+   * agreeing the moment the search settles a few pixels away from the box.
+   */
+  readonly id?: string
   readonly rect: Rect
   /** Inclusive frame range this region applies to. */
   readonly fromFrame: number

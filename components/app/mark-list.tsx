@@ -1,8 +1,8 @@
 "use client"
 
-import { ChevronRight, Crosshair, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronRight, Crosshair, Trash2 } from "lucide-react"
 import { useState } from "react"
-import type { ManualMarkInput } from "@gvowr/ipc"
+import type { ManualMarkInput, ManualOutcomeSummary } from "@gvowr/ipc"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,8 +22,23 @@ import { cn } from "@/lib/utils"
  * per frame will happily push the picture off the screen — which takes the space away
  * from precisely the thing you need in order to draw the next one.
  */
+/**
+ * A measured alpha outside this band, or a score under this floor, is not wrong — it
+ * is unusual, and worth a person's eye.
+ *
+ * The bounds come from the calibration clip: the corner mark measures 0.96–1.06 and
+ * the roaming one 1.17–1.25, both genuine. A bright rim that is not a mark at all
+ * measured 1.32 at a score of 0.26. The distributions overlap, which is exactly why
+ * this flags rather than rejects — see `PLAN.md` §2.2.
+ */
+const USUAL_ALPHA_MIN = 0.85
+const USUAL_ALPHA_MAX = 1.3
+const WEAK_SCORE = 0.35
+
 export function MarkList({
   marks,
+  outcomes,
+  onEnableFill,
   still = false,
   selectedId,
   frameRate,
@@ -36,6 +51,10 @@ export function MarkList({
   disabled,
 }: {
   marks: readonly ManualMarkInput[]
+  /** What the last run made of each region. Empty before a run. */
+  outcomes?: readonly ManualOutcomeSummary[]
+  /** Turns the fill on for the next run, from a refused region's own row. */
+  onEnableFill?: () => void
   /** On a still there is one frame, so a frame range is not a thing to edit. */
   still?: boolean
   selectedId: string | null
@@ -149,6 +168,11 @@ export function MarkList({
               </span>
                 </>
               )}
+              <MarkStatus
+                outcome={outcomes?.find((entry) => entry.markId === mark.id)}
+                onEnableFill={onEnableFill}
+                disabled={disabled}
+              />
               <Button
                 variant="ghost"
                 size="icon"
@@ -171,5 +195,91 @@ export function MarkList({
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * What happened to one drawn region, in a word.
+ *
+ * Weak numbers are flagged, never hidden and never acted on: a region the verifier
+ * accepted on thin evidence is the one place this tool can quietly damage a picture,
+ * and the person who drew the box is better placed to judge it than any threshold —
+ * measurement says no threshold separates the two cases.
+ */
+function MarkStatus({
+  outcome,
+  onEnableFill,
+  disabled,
+}: {
+  outcome: ManualOutcomeSummary | undefined
+  onEnableFill?: () => void
+  disabled: boolean
+}) {
+  if (!outcome) return null
+
+  if (outcome.filled > 0) {
+    return (
+      <span
+        className="shrink-0 rounded bg-track-roaming/15 px-1.5 py-0.5 text-[10px] text-track-roaming"
+        title={`${outcome.filled} region(s) synthesised from the surroundings — invented, not recovered`}
+      >
+        filled
+      </span>
+    )
+  }
+
+  if (outcome.removed === 0) {
+    return (
+      <span className="flex shrink-0 items-center gap-1">
+        <span
+          className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+          title="Nothing here inverted into its surroundings, so nothing was removed"
+        >
+          refused
+        </span>
+        {onEnableFill && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[10px]"
+            disabled={disabled}
+            onClick={onEnableFill}
+            title="Switch on Fill and run again — pixels will be invented here"
+          >
+            Fill it
+          </Button>
+        )}
+      </span>
+    )
+  }
+
+  const weak =
+    (outcome.confidence !== null && outcome.confidence < WEAK_SCORE) ||
+    (outcome.alpha !== null && (outcome.alpha < USUAL_ALPHA_MIN || outcome.alpha > USUAL_ALPHA_MAX))
+
+  const detail =
+    `removed on ${outcome.removed} frame(s)` +
+    (outcome.alpha !== null ? `, alpha ${outcome.alpha.toFixed(2)}` : "") +
+    (outcome.confidence !== null ? `, score ${outcome.confidence.toFixed(2)}` : "")
+
+  if (weak) {
+    return (
+      <span
+        className="flex shrink-0 items-center gap-1 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning"
+        title={`${detail}. That is outside the range a real mark usually measures — worth checking this region in the comparison before you rely on it.`}
+      >
+        <AlertTriangle className="size-3" />
+        check
+      </span>
+    )
+  }
+
+  return (
+    <span
+      className="shrink-0 rounded bg-success/15 px-1.5 py-0.5 text-[10px] text-success"
+      title={detail}
+    >
+      removed
+    </span>
   )
 }

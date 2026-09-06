@@ -239,3 +239,50 @@ describe("the fill's licence", () => {
     assert.deepEqual(Array.from(frame.data), Array.from(before))
   })
 })
+
+/**
+ * What the engine reports back about each drawn region.
+ *
+ * The numbers matter more here than anywhere else in the pipeline, because they are
+ * what a person uses to decide whether a hand-marked removal was real — the one
+ * judgement this tool cannot make for them (`PLAN.md` §2.2).
+ */
+describe("outcomes for drawn regions", () => {
+  it("reports a region that verified, with what it measured", () => {
+    const frame = marked()
+    const planner = createPlanner(syntheticDiamond(MARK.width), {
+      mode: "auto",
+      sweepInterval: 1,
+      sizes: [MARK.width],
+      manualMarks: [{ id: "drawn-1", rect: MARK, fromFrame: 0, toFrame: 0 }],
+    })
+    planner.push(frame)
+    const plan = planner.finish()
+
+    const outcome = plan.manualOutcomes.find((entry) => entry.markId === "drawn-1")
+    assert.ok(outcome, "the drawn region was not reported at all")
+    assert.equal(outcome.removed, 1)
+    assert.equal(outcome.refused, 0)
+    assert.ok(outcome.alpha !== null && outcome.alpha > 0.5, `alpha was ${outcome.alpha}`)
+    assert.ok(outcome.confidence !== null)
+  })
+
+  it("reports a region that was refused, and says so rather than staying silent", () => {
+    const frame = scene()
+    const planner = createPlanner(syntheticDiamond(40), {
+      mode: "auto",
+      sweepInterval: 1,
+      sizes: [40],
+      manualMarks: [{ id: "drawn-2", rect: { x: 40, y: 40, width: 40, height: 40 }, fromFrame: 0, toFrame: 0 }],
+    })
+    planner.push(frame)
+    const plan = planner.finish()
+
+    const outcome = plan.manualOutcomes.find((entry) => entry.markId === "drawn-2")
+    assert.ok(outcome, "a refused region produced no outcome")
+    assert.equal(outcome.removed, 0)
+    assert.equal(outcome.refused, 1)
+    assert.equal(outcome.alpha, null)
+    assert.equal(plan.refusals[0]?.markId, "drawn-2")
+  })
+})

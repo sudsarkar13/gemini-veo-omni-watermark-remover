@@ -129,6 +129,26 @@ export interface JobResult {
   readonly trackedTo: number
   readonly audioCopied: boolean
   readonly elapsedMs: number
+  /**
+   * What became of each region the user drew, keyed by the id the UI gave it.
+   *
+   * Reported rather than judged: measurement shows a genuine faint mark and a bright
+   * patch that is not a mark cannot be told apart by score, so the numbers go to the
+   * person who drew the box. See `PLAN.md` §2.2.
+   */
+  readonly manualOutcomes: readonly ManualOutcomeSummary[]
+}
+
+export interface ManualOutcomeSummary {
+  readonly markId: string
+  /** Frames where the region verified and was corrected. */
+  readonly removed: number
+  /** Frames where it was searched and refused. */
+  readonly refused: number
+  /** Frames where pixels were synthesised there instead. */
+  readonly filled: number
+  readonly alpha: number | null
+  readonly confidence: number | null
 }
 
 /**

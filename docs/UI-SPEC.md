@@ -208,6 +208,7 @@ Rather than lower the bar for everyone, the user can say where the mark is.
 | Frame range | Two numeric fields + drag on timeline | Inclusive. Defaults to the current frame through the end of the clip. |
 | Nudge / resize | Arrow keys, handles | Selected region only. |
 | Delete region | `⌫` or row button | |
+| Region outcome | Chip on the row, after a run | `removed` · `check` · `refused` · `filled`. Hovering gives the measured alpha, score and frame count. `check` means the numbers are outside what a real mark usually measures — it is a flag for a person, never a refusal, because measurement shows no threshold separates a faint genuine mark from a bright patch that is not one (`PLAN.md` §2.2). `refused` carries a **Fill it** action that switches on the fill for the next run. |
 
 **A drawn region is a prior, not an instruction.** It seeds the search where the user
 says the mark is; the engine still settles the exact position and still measures the

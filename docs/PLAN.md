@@ -93,6 +93,36 @@ against it were meaningless, which was demonstrated the hard way — see §9.
 The only irrecoverable case is a pixel that clipped at 255 under the mark; that
 information is genuinely gone.
 
+### 2.2 Why a hand-drawn region is not held to a stricter bar
+
+A box drawn over ordinary bright content can pass the verifier and have a diamond
+subtracted out of it. On the calibration frame, a region drawn on the lit rim of the
+wheel — where there is no mark at all — was accepted at alpha 1.32 and score 0.26.
+
+The obvious fix is a stricter bar for drawn regions. It does not survive measurement.
+Peak correlation, and how far that peak stands above the same template scored around
+its own neighbourhood:
+
+| Region | Peak | Margin over neighbourhood |
+| --- | --- | --- |
+| **Genuine** corner mark | 0.79 | 0.67 |
+| **Genuine** roaming mark, at 56 px | 0.39 | 0.28 |
+| False positive: lit rim | 0.30 | 0.18 |
+| False positive: lettering | 0.25 | 0.16 |
+| **Genuine** roaming mark, at 48 px | 0.20 | 0.08 |
+| False positive: black sky | 0.18 | 0.07 |
+
+The genuine roaming mark scores *below* two of the false positives. Alpha does not
+separate them either: genuine detections on this clip run 0.96–1.06 (corner) and
+1.17–1.25 (roaming), against 1.32 for the rim. **Any bar that rejects the false
+positives also rejects the mark hand-marking exists to catch.**
+
+So the engine applies what verifies and reports the numbers per region, and the UI
+shows each drawn region's outcome with the unusual ones flagged for a person to look
+at — `removed` · `check` · `refused` · `filled`. Flagging is safe where rejecting is
+not, and the person who drew the box is better placed to judge it than a threshold
+that provably cannot.
+
 ### 2.1 The fallback, for where the maths cannot go
 
 Reverse blending recovers the pixels that were actually there. Nothing else in this

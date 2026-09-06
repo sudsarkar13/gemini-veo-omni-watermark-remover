@@ -76,6 +76,7 @@ export {
   type FrameRange,
   type DetectionMode,
   type FrameReport,
+  type ManualOutcome,
   type PlanOptions,
   type RefusedRegion,
   type RenderOptions,

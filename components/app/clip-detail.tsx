@@ -307,6 +307,8 @@ export function ClipDetail({
 
           <MarkList
             marks={marks}
+            outcomes={job.result?.manualOutcomes ?? []}
+            onEnableFill={() => setOptions((current) => ({ ...current, fill: true }))}
             still={still}
             selectedId={selectedMark}
             frameRate={frameRate}

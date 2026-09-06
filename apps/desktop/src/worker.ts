@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 import { defaultTemplate, loadTemplatePpm, type AlphaMap } from "@gvowr/engine"
 import { processImage, processVideo } from "@gvowr/video"
 
-import type { JobOptions, MediaKind } from "@gvowr/ipc"
+import type { JobOptions, ManualOutcomeSummary, MediaKind } from "@gvowr/ipc"
 
 /**
  * Child process that runs one job.
@@ -31,6 +31,7 @@ export type WorkerMessage =
   | { type: "failed"; message: string }
 
 export interface WorkerResult {
+  readonly manualOutcomes: readonly ManualOutcomeSummary[]
   /** False when nothing was written and the original was left untouched. */
   readonly written: boolean
   readonly reason: "no-mark-found" | "not-invertible" | null
@@ -52,21 +53,48 @@ async function loadTemplate(options: JobOptions): Promise<AlphaMap> {
   return defaultTemplate()
 }
 
-/**
- * The renderer's id is for the interface's benefit; the engine takes the geometry and
- * the range and nothing else.
- */
 function manualMarksFor(options: JobOptions): {
-  manualMarks?: { rect: { x: number; y: number; width: number; height: number }; fromFrame: number; toFrame: number }[]
+  manualMarks?: {
+    id: string
+    rect: { x: number; y: number; width: number; height: number }
+    fromFrame: number
+    toFrame: number
+  }[]
 } {
   if (!options.manualMarks?.length) return {}
   return {
     manualMarks: options.manualMarks.map((mark) => ({
+      // The id is the renderer's, carried through untouched so the result can be
+      // reported against the region the user drew rather than matched back by
+      // geometry — which stops agreeing as soon as the search settles a few pixels
+      // away from the box.
+      id: mark.id,
       rect: mark.rect,
       fromFrame: mark.fromFrame,
       toFrame: mark.toFrame,
     })),
   }
+}
+
+/**
+ * The engine's per-region outcomes, plus how many of them were filled.
+ *
+ * The engine reports what verified and what it refused; whether a refusal was then
+ * synthesised is a rendering decision, so the two are joined here rather than either
+ * side pretending to know the other's business.
+ */
+function outcomesFor(
+  plan: { manualOutcomes: readonly { markId: string; removed: number; refused: number; alpha: number | null; confidence: number | null }[]; refusals: readonly { markId?: string }[] },
+  filled: boolean
+): ManualOutcomeSummary[] {
+  return plan.manualOutcomes.map((outcome) => ({
+    markId: outcome.markId,
+    removed: outcome.removed,
+    refused: outcome.refused,
+    filled: filled ? outcome.refused : 0,
+    alpha: outcome.alpha,
+    confidence: outcome.confidence,
+  }))
 }
 
 function send(message: WorkerMessage): void {
@@ -98,6 +126,7 @@ process.on("message", (message: StartMessage) => {
             framesCorrected: image.applied,
             framesLeftUntouched: image.skipped,
             framesFilled: image.filled,
+            manualOutcomes: outcomesFor(image.plan, message.options.fill === true),
             // A still has no timeline, so it has no gaps in one. Saying "0 frames
             // uncovered" here is a fact, not a reassurance: `written` is what carries
             // the bad news.
@@ -138,6 +167,7 @@ process.on("message", (message: StartMessage) => {
           framesCorrected: result.framesCorrected,
           framesLeftUntouched: result.framesLeftUntouched,
           framesFilled: result.framesFilled,
+          manualOutcomes: outcomesFor(result.plan, message.options.fill === true),
           framesUncovered: result.coverage.framesUncovered,
           uncoveredRanges: result.coverage.gaps,
           trackedFrom: result.coverage.firstFrame,
