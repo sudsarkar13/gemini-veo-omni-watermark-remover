@@ -1,7 +1,7 @@
 "use client"
 
 import { Maximize, Minus, Plus } from "lucide-react"
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ClipMedia, FilmstripWindow, JobResult } from "@gvowr/ipc"
 
 import { Button } from "@/components/ui/button"
@@ -62,6 +62,7 @@ export function Timeline({
   frameCount,
   onSeek,
   result,
+  playing = false,
 }: {
   className?: string
   /** Needed to ask for a denser strip over the visible window. */
@@ -73,6 +74,17 @@ export function Timeline({
   frameCount: number
   onSeek: (seconds: number) => void
   result: JobResult | null
+  /**
+   * True while the clip is playing.
+   *
+   * A zoomed window follows the playhead, so during playback its start crosses a
+   * quantisation boundary every second or so — and each crossing would run FFmpeg
+   * again in the main process. That work competes with decoding on the same machine
+   * and is heard as audio breaking up before it is seen. The strip in hand is a
+   * moment stale during playback, which nobody can see at twenty-four frames a
+   * second, and it is refreshed as soon as the clip stops.
+   */
+  playing?: boolean
 }) {
   const stripRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
@@ -133,12 +145,24 @@ export function Timeline({
   )
   const dense = useFilmstripWindow(
     jobId,
-    zoomed && stripWidth > 0
+    zoomed && stripWidth > 0 && !playing
       ? { fromSeconds: requestedFrom, toSeconds: requestedTo, count: requestedCount }
       : null
   )
 
-  const frames = visibleFrames(dense, media, clip, from, to)
+  /**
+   * Memoised, because this is rebuilt on every tick of playback otherwise.
+   *
+   * The playhead moves several times a second, and each move re-renders this
+   * component. Without memoising, that re-diffs twenty-eight images and up to four
+   * hundred waveform bars each time, for a picture that has not changed — work that
+   * competes with video decoding for the same main thread and shows up as a stutter.
+   * At fit these inputs are constant, so the strip is built once.
+   */
+  const frames = useMemo(
+    () => visibleFrames(dense, media, clip, from, to),
+    [dense, media, clip, from, to]
+  )
 
   // Wheel zoom is attached by hand: React's wheel listener is passive, so
   // preventDefault through onWheel is ignored and the pane scrolls instead.
@@ -174,6 +198,39 @@ export function Timeline({
   const firstBar = Math.floor((from / clip) * waveform.length)
   const lastBar = Math.ceil((to / clip) * waveform.length)
   const bars = zoomed ? waveform.slice(firstBar, Math.max(firstBar + 1, lastBar)) : waveform
+
+  const filmstrip = useMemo(
+    () =>
+      frames.map((frame) => (
+        // Plain img: these are local media:// URLs, which next/image cannot optimise
+        // and should not try to.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={frame.index}
+          src={frame.src}
+          alt=""
+          draggable={false}
+          className="absolute inset-y-0 h-full object-cover"
+          style={{
+            left: `${((frame.from - from) / span) * 100}%`,
+            width: `${((frame.to - frame.from) / span) * 100}%`,
+          }}
+        />
+      )),
+    [frames, from, span]
+  )
+
+  const waveformBars = useMemo(
+    () =>
+      bars.map((amplitude, index) => (
+        <div
+          key={index}
+          className="min-w-0 max-w-[6px] flex-1 rounded-[1px] bg-muted-foreground/50"
+          style={{ height: `${Math.max(4, amplitude * 100)}%` }}
+        />
+      )),
+    [bars]
+  )
 
   return (
     <div
@@ -261,22 +318,7 @@ export function Timeline({
       >
         {frames.length > 0 ? (
           <div className="relative h-14 w-full overflow-hidden border-y border-border">
-            {frames.map((frame) => (
-              // Plain img: these are local media:// URLs, which next/image cannot
-              // optimise and should not try to.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={frame.index}
-                src={frame.src}
-                alt=""
-                draggable={false}
-                className="absolute inset-y-0 h-full object-cover"
-                style={{
-                  left: `${percent(frame.from)}%`,
-                  width: `${((frame.to - frame.from) / span) * 100}%`,
-                }}
-              />
-            ))}
+            {filmstrip}
           </div>
         ) : (
           <div className="flex h-14 items-center justify-center border-y border-border text-[11px] text-muted-foreground">
@@ -292,13 +334,7 @@ export function Timeline({
           */}
         {bars.length > 0 && (
           <div className="flex h-9 items-center justify-between gap-px overflow-hidden bg-background/60 px-px">
-            {bars.map((amplitude, index) => (
-              <div
-                key={index}
-                className="min-w-0 max-w-[6px] flex-1 rounded-[1px] bg-muted-foreground/50"
-                style={{ height: `${Math.max(4, amplitude * 100)}%` }}
-              />
-            ))}
+            {waveformBars}
           </div>
         )}
 

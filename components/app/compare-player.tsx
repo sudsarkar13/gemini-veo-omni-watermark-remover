@@ -22,7 +22,34 @@ import { cn } from "@/lib/utils"
 
 export type CompareMode = "split" | "side" | "before" | "after"
 
+/**
+ * How far the cleaned copy may drift before it is dragged back, while paused.
+ *
+ * Paused, a hard seek costs nothing. Playing, it costs a visible hitch — see
+ * `syncAfter`.
+ */
 const SYNC_TOLERANCE_SECONDS = 0.08
+
+/**
+ * Drift the cleaned copy is allowed during playback before it is seeked outright.
+ *
+ * Well beyond a frame, deliberately: inside this band the drift is corrected by
+ * nudging its rate rather than by jumping it, because a seek on a playing element
+ * stalls its decoder and the stall is exactly what a comparison must not have.
+ */
+const PLAYING_SEEK_SECONDS = 0.3
+/** Largest rate change used to close a drift. Small enough to be invisible. */
+const MAX_RATE_NUDGE = 0.06
+
+/**
+ * How far the incoming time may sit from the element's own before it is treated as a
+ * seek from elsewhere.
+ *
+ * A quarter of a second is longer than the gap between the element's own time
+ * reports, so its own progress never looks like an external seek — and any real seek
+ * from the timeline or a frame step is far larger than this.
+ */
+const EXTERNAL_SEEK_SECONDS = 0.25
 
 /** Labels written out rather than derived, so casing does not depend on a CSS variant. */
 const COMPARE_MODES: readonly { value: CompareMode; label: string }[] = [
@@ -107,6 +134,7 @@ export function ComparePlayer({
   marking,
   onMarkingChange,
   canMark,
+  onPlayingChange,
 }: {
   className?: string
   media: ClipMedia
@@ -123,6 +151,8 @@ export function ComparePlayer({
   marking: boolean
   onMarkingChange: (marking: boolean) => void
   canMark: boolean
+  /** So the rest of the screen can stop doing expensive work while this plays. */
+  onPlayingChange?: (playing: boolean) => void
 }) {
   const beforeRef = useRef<HTMLVideoElement>(null)
   const afterRef = useRef<HTMLVideoElement>(null)
@@ -131,7 +161,7 @@ export function ComparePlayer({
 
   const hasAfter = media.outputUrl !== null
   const still = kind === "image"
-  const [playing, setPlaying] = useState(false)
+  const [playing, setPlayingState] = useState(false)
   const [split, setSplit] = useState(0.5)
   const [view, setView] = useState<View>(FIT)
   const [layerWidth, setLayerWidth] = useState(0)
@@ -231,24 +261,76 @@ export function ComparePlayer({
     setView((prev) => zoomAt(prev, requested, 0, 0, maxZoomRef.current))
   }, [])
 
+  /**
+   * Keeps the cleaned copy alongside the original without seeking it while it plays.
+   *
+   * Seeking a playing video element flushes its decode pipeline: the picture stalls
+   * for a moment and, on the element carrying sound, the audio clicks. Doing that
+   * several times a second — which is what a tight tolerance amounts to — is the
+   * stutter itself rather than a cure for drift.
+   *
+   * So while playing, small drift is closed by running the follower a per cent or two
+   * fast or slow until it catches up, which is inaudible and invisible. Only a drift
+   * too large to nudge away is seeked. Paused, there is nothing to disturb and the
+   * exact frame matters, so it is set outright.
+   */
+  const setPlaying = useCallback(
+    (value: boolean) => {
+      setPlayingState(value)
+      onPlayingChange?.(value)
+    },
+    [onPlayingChange]
+  )
+
   const syncAfter = useCallback(() => {
     const before = beforeRef.current
     const after = afterRef.current
     if (!before || !after) return
-    if (Math.abs(after.currentTime - before.currentTime) > SYNC_TOLERANCE_SECONDS) {
-      after.currentTime = before.currentTime
+
+    const drift = before.currentTime - after.currentTime
+
+    if (before.paused) {
+      if (Math.abs(drift) > SYNC_TOLERANCE_SECONDS) after.currentTime = before.currentTime
+      if (after.playbackRate !== 1) after.playbackRate = 1
+      return
     }
+
+    if (Math.abs(drift) > PLAYING_SEEK_SECONDS) {
+      after.currentTime = before.currentTime
+      after.playbackRate = 1
+      return
+    }
+
+    // Behind means speed up, ahead means slow down, in proportion to the gap.
+    const nudge = Math.max(-MAX_RATE_NUDGE, Math.min(MAX_RATE_NUDGE, drift * 0.5))
+    const rate = 1 + nudge
+    if (Math.abs(after.playbackRate - rate) > 0.005) after.playbackRate = rate
   }, [])
 
-  // Seeks originate outside this component (timeline clicks, frame stepping), so the
-  // elements follow the incoming time rather than owning it.
+  /**
+   * The last time this component reported upward.
+   *
+   * Without it the player fights itself: the element reports its time, that becomes
+   * state, the state comes back as a prop, and the effect below sees a difference —
+   * because the element has moved on in the meantime — and seeks the playing video
+   * back to where it was a moment ago. That is a stutter and an audible click, and it
+   * happens only when the round trip is slow enough to matter, which is why it comes
+   * and goes.
+   *
+   * Comparing against what we last reported tells the two apart: an incoming time we
+   * did not report is a seek from the timeline or a frame step and must be obeyed;
+   * one we did report is the element's own progress and must be ignored.
+   */
+  const reported = useRef(0)
+
   useEffect(() => {
     const before = beforeRef.current
     if (!before) return
-    if (Math.abs(before.currentTime - currentTime) > SYNC_TOLERANCE_SECONDS) {
-      before.currentTime = currentTime
-      syncAfter()
-    }
+    if (Math.abs(currentTime - reported.current) < EXTERNAL_SEEK_SECONDS) return
+    if (Math.abs(before.currentTime - currentTime) < EXTERNAL_SEEK_SECONDS) return
+    before.currentTime = currentTime
+    reported.current = currentTime
+    syncAfter()
   }, [currentTime, syncAfter])
 
   const toggle = useCallback(() => {
@@ -264,7 +346,7 @@ export function ComparePlayer({
       after?.pause()
       setPlaying(false)
     }
-  }, [])
+  }, [setPlaying])
 
   const step = useCallback(
     (frames: number) => {
@@ -276,10 +358,11 @@ export function ComparePlayer({
       const delta = frames / (frameRate > 0 ? frameRate : 30)
       const next = Math.max(0, Math.min(before.duration || 0, before.currentTime + delta))
       before.currentTime = next
+      reported.current = next
       onTimeChange(next)
       syncAfter()
     },
-    [frameRate, onTimeChange, syncAfter]
+    [frameRate, onTimeChange, setPlaying, syncAfter]
   )
 
   /**
@@ -436,6 +519,7 @@ export function ComparePlayer({
                   src={media.sourceUrl}
                   className="absolute inset-0 size-full object-contain"
                   onTimeUpdate={(event) => {
+                    reported.current = event.currentTarget.currentTime
                     onTimeChange(event.currentTarget.currentTime)
                     syncAfter()
                   }}

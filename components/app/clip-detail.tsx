@@ -49,6 +49,9 @@ export function ClipDetail({
   const [marks, setMarks] = useState<ManualMarkInput[]>([])
   const [selectedMark, setSelectedMark] = useState<string | null>(null)
   const [marking, setMarking] = useState(false)
+  // Kept here rather than in the player, because it is the timeline that has to stop
+  // asking the main process for thumbnails while the clip is playing.
+  const [playing, setPlaying] = useState(false)
 
   const still = job.info?.kind === "image"
   const frameRate = job.info?.frameRate || 30
@@ -116,6 +119,7 @@ export function ClipDetail({
             onDurationChange={setDuration}
             marking={marking}
             onMarkingChange={setMarking}
+            onPlayingChange={setPlaying}
             canMark={!busy && job.info !== null}
             overlay={
               job.info ? (
@@ -150,6 +154,7 @@ export function ClipDetail({
             frameCount={job.info?.frameCount ?? 0}
             onSeek={setCurrentTime}
             result={job.result}
+            playing={playing}
           />
         )}
       </div>
