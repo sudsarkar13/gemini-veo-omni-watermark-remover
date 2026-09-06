@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertTriangle, Brush, FolderOpen, Play, SearchX, Square, Upload } from "lucide-react"
+import { AlertTriangle, Brush, FolderOpen, Play, ScanSearch, SearchX, Square, Upload } from "lucide-react"
 import { useState } from "react"
 import type { Job, JobOptions, ManualMarkInput, StoredResult } from "@gvowr/ipc"
 
@@ -10,6 +10,7 @@ import { MarkList } from "@/components/app/mark-list"
 import { MarkOverlay } from "@/components/app/mark-overlay"
 import { LiveMeters } from "@/components/app/live-meters"
 import { Preflight } from "@/components/app/preflight"
+import { ResidualBadge } from "@/components/app/residual-badge"
 import { Timeline } from "@/components/app/timeline"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -41,6 +42,8 @@ export function ClipDetail({
   onReveal,
   onExport,
   onExportAs,
+  onCheck,
+  checking,
 }: {
   job: Job
   /** The stored render for this job, if the run produced one. */
@@ -51,6 +54,8 @@ export function ClipDetail({
   onReveal: () => void
   onExport: () => void
   onExportAs: () => void
+  onCheck: () => void
+  checking: boolean
 }) {
   const [options, setOptions] = useState<JobOptions>(DEFAULT_OPTIONS)
   const [currentTime, setCurrentTime] = useState(0)
@@ -76,6 +81,34 @@ export function ClipDetail({
     job.id,
     `${job.info ? "probed" : "unprobed"}:${job.result?.outputPath ?? ""}`
   )
+
+  // The stored row is authoritative: it is what a re-check updates, and the job's own
+  // copy is only ever the verdict from the run that produced it.
+  const residual = result?.residual ?? job.result?.residual ?? null
+  const leftovers = residual && residual.framesMarked > 0 ? residual : null
+
+  /**
+   * Turns every leftover into a region and runs again.
+   *
+   * The ranges are widened backward by one sweep interval here, which the badge
+   * deliberately does not do. The two are different kinds of statement: the badge
+   * reports what was confirmed and must not round a guess into a measurement, whereas
+   * a region is only a place to look — the engine still measures the alpha before it
+   * removes anything, so pointing it slightly early costs nothing and starting late
+   * misses frames.
+   */
+  const rerunFromLeftovers = (): void => {
+    if (!leftovers) return
+    const seeded: ManualMarkInput[] = leftovers.ranges.map((range, index) => ({
+      id: `leftover-${index}-${range.from}`,
+      rect: range.rect,
+      fromFrame: Math.max(0, range.from - leftovers.sweepInterval),
+      toFrame: range.to,
+    }))
+    setMarks(seeded)
+    setMarking(false)
+    onStart({ ...options, manualMarks: seeded })
+  }
 
   const busy = job.state === "analysing" || job.state === "processing"
   const rerunnable = ["done", "done-with-skips", "done-with-fill", "no-mark-found", "failed", "cancelled"].includes(
@@ -163,6 +196,7 @@ export function ClipDetail({
             frameCount={job.info?.frameCount ?? 0}
             onSeek={setCurrentTime}
             result={job.result}
+            residual={residual}
             playing={playing}
           />
         )}
@@ -214,6 +248,62 @@ export function ClipDetail({
                 , and nothing was applied there — they are marked in orange on the
                 timeline. Full-frame sweep in Advanced searches more often and usually
                 closes a gap like this.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/*
+            * The one card here that describes the output rather than the plan.
+            *
+            * It is shown even when the run reported a clean sweep — especially then.
+            * A job that says "done", no skips and no failures, over a file that still
+            * carries the mark is exactly the case every other number in this panel is
+            * incapable of surfacing.
+            */}
+          {leftovers && (
+            <Alert className="border-warning/40 bg-warning/5 text-foreground">
+              <ScanSearch className="size-4 text-warning" />
+              <AlertTitle className="text-warning">
+                The finished {still ? "image" : "file"} still reads as marked
+                {still ? "" : ` on ${leftovers.framesMarked} frame${leftovers.framesMarked === 1 ? "" : "s"}`}
+              </AlertTitle>
+              <AlertDescription className="text-muted-foreground">
+                {still ? (
+                  <>
+                    Reading the written image back, {leftovers.ranges.length} region
+                    {leftovers.ranges.length === 1 ? "" : "s"} still inverted as a composite
+                    {leftovers.ranges[0]
+                      ? ` (alpha ${leftovers.ranges[0].peakAlpha.toFixed(2)})`
+                      : ""}
+                    .
+                  </>
+                ) : (
+                  <>
+                    Reading the render back frame by frame, the mark still measures at{" "}
+                    {leftovers.ranges
+                      .slice(0, 3)
+                      .map((range) =>
+                        range.from === range.to
+                          ? `frame ${range.from}`
+                          : `frames ${range.from}–${range.to}`
+                      )
+                      .join(", ")}
+                    {leftovers.ranges.length > 3
+                      ? `, and ${leftovers.ranges.length - 3} more`
+                      : ""}
+                    . Each range starts where it was confirmed; the check samples every{" "}
+                    {leftovers.sweepInterval} frames, so it may have appeared a little
+                    earlier.
+                  </>
+                )}{" "}
+                Running again from these regions points the search straight at them — it
+                still measures each one before removing anything.
+                <div className="mt-2">
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={rerunFromLeftovers}>
+                    <Play className="size-3.5" />
+                    Run again from leftovers
+                  </Button>
+                </div>
               </AlertDescription>
             </Alert>
           )}
@@ -376,6 +466,14 @@ export function ClipDetail({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          {(residual || checking || result) && (
+            <ResidualBadge
+              residual={residual}
+              checking={checking}
+              {...(result && result.exportedTo === null ? { onCheck } : {})}
+              {...(still ? {} : { onJump: seekToFrame })}
+            />
+          )}
           {result && (
             <Button variant="ghost" size="sm" onClick={onReveal}>
               <FolderOpen className="size-4" />

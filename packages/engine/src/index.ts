@@ -94,4 +94,5 @@ export {
   type ResidualOptions,
   type ResidualRange,
   type ResidualReport,
+  type TouchedTrack,
 } from "./residual.ts"

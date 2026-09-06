@@ -335,7 +335,10 @@ function describeResidual(report: ResidualReport | null): string | null {
   const ranges = report.ranges
     .map((range) => {
       const span = range.from === range.to ? `${range.from}` : `${range.from}-${range.to}`
-      return `${span} ${range.kind} (${range.rect.width}px at ${range.rect.x},${range.rect.y})`
+      return (
+        `${span} ${range.kind} (${range.rect.width}px at ${range.rect.x},${range.rect.y}, ` +
+        `alpha ${range.peakAlpha.toFixed(2)})`
+      )
     })
     .join(", ")
   return (

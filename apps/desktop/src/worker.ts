@@ -1,6 +1,15 @@
-import { readFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
 
-import { createResidualChecker, defaultTemplate, loadTemplatePpm, type AlphaMap } from "@gvowr/engine"
+import {
+  createResidualChecker,
+  defaultTemplate,
+  loadTemplatePpm,
+  type AlphaMap,
+  type Rect,
+  type TouchedTrack,
+  type WatermarkTrack,
+} from "@gvowr/engine"
 import {
   decodeFrames,
   decodeImage,
@@ -178,12 +187,74 @@ function send(message: WorkerMessage): void {
   process.send?.(message)
 }
 
+/**
+ * What the plan touched, written beside the render so it outlives the run.
+ *
+ * Without this a later re-check can only ask half the question. The check finds an
+ * under-shoot by re-scoring the rectangles the plan corrected, and those live in the
+ * tracker's state, which dies with the worker — so a re-check on a stored render would
+ * come back "no leftovers found" on precisely the frames the run itself had flagged.
+ * Silently turning a true finding into an all-clear is the one failure this whole pass
+ * exists to prevent, so the rectangles are persisted rather than the question dropped.
+ *
+ * It lives in the result's own directory, so it is removed by the same `rm` that
+ * removes the render on export, deletion, or expiry.
+ */
+const TOUCHED_FILE = "touched.json"
+
+interface TouchedFile {
+  readonly version: 1
+  /** Per track, `[frame, x, y, width, height]` rows. Compact because it can be long. */
+  readonly tracks: readonly (readonly (readonly number[])[])[]
+}
+
+async function writeTouched(outputPath: string, tracks: readonly WatermarkTrack[]): Promise<void> {
+  const payload: TouchedFile = {
+    version: 1,
+    tracks: tracks.map((track) =>
+      [...track.frames.entries()].map(([frame, at]) => [
+        frame,
+        at.rect.x,
+        at.rect.y,
+        at.rect.width,
+        at.rect.height,
+      ])
+    ),
+  }
+  // A failure here costs a future re-check some accuracy; it must never cost the run
+  // that just succeeded, so it is written after the render and never rethrown.
+  await writeFile(join(dirname(outputPath), TOUCHED_FILE), JSON.stringify(payload)).catch(
+    () => undefined
+  )
+}
+
+async function readTouched(outputPath: string): Promise<TouchedTrack[]> {
+  try {
+    const raw = await readFile(join(dirname(outputPath), TOUCHED_FILE), "utf8")
+    const parsed = JSON.parse(raw) as TouchedFile
+    if (parsed.version !== 1 || !Array.isArray(parsed.tracks)) return []
+    return parsed.tracks.map((rows) => ({
+      frames: new Map(
+        rows.map((row: readonly number[]) => {
+          const [frame = 0, x = 0, y = 0, width = 0, height = 0] = row
+          const rect: Rect = { x, y, width, height }
+          return [frame, { rect }] as const
+        })
+      ),
+    }))
+  } catch {
+    return []
+  }
+}
+
 /** A check on its own, over a file that has already been written. */
 async function runCheck(message: CheckMessage): Promise<ResidualSummary | null> {
   const template = await loadTemplate(
     message.templatePath ? { templatePath: message.templatePath } : {}
   )
-  const checker = createResidualChecker(template)
+  // Same two questions the run asked, so the answer is comparable to the one on the
+  // row. An absent file only costs the under-shoot half; it is never fatal.
+  const checker = createResidualChecker(template, { tracks: await readTouched(message.path) })
 
   if (message.kind === "image") {
     checker.push(await decodeImage(message.path, await probeImage(message.path)))
@@ -227,6 +298,8 @@ process.on("message", (message: StartMessage | CheckMessage) => {
           ...(message.options.fill ? { fill: true } : {}),
           ...manualMarksFor(message.options),
         })
+
+        if (image.written) await writeTouched(message.output, image.plan.tracks)
 
         send({
           type: "done",
@@ -272,6 +345,8 @@ process.on("message", (message: StartMessage | CheckMessage) => {
           send({ type: "progress", stage: "checking", frame, totalFrames })
         },
       })
+
+      await writeTouched(message.output, result.plan.tracks)
 
       send({
         type: "done",

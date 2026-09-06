@@ -3,6 +3,7 @@
 import { Film, FolderOpen, Image as ImageIcon, Trash2, Upload } from "lucide-react"
 import type { StoredResult } from "@gvowr/ipc"
 
+import { ResidualBadge } from "@/components/app/residual-badge"
 import { Button } from "@/components/ui/button"
 import { formatBytes, truncateMiddle } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -18,16 +19,20 @@ import { cn } from "@/lib/utils"
 export function ResultRow({
   result,
   retentionDays,
+  checking = false,
   onExport,
   onExportAs,
+  onCheck,
   onReveal,
   onRemove,
 }: {
   result: StoredResult
   /** Zero means results are kept forever, so nothing counts down. */
   retentionDays: number
+  checking?: boolean
   onExport: () => void
   onExportAs: () => void
+  onCheck: () => void
   onReveal: () => void
   onRemove: () => void
 }) {
@@ -53,6 +58,17 @@ export function ResultRow({
             {formatBytes(result.sizeBytes)} · {expiry(result, retentionDays)}
           </span>
         )}
+      </div>
+
+      {/* The verdict sits above the actions rather than beside the size, because it is
+          the one line here that can disagree with the run's own summary — and Export
+          is the action it should be read before. */}
+      <div className="mt-1 pl-5.5">
+        <ResidualBadge
+          residual={result.residual}
+          checking={checking}
+          {...(exported ? {} : { onCheck })}
+        />
       </div>
 
       <div className="mt-1 flex items-center gap-1 pl-4">

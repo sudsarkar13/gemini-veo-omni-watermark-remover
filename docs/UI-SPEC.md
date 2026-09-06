@@ -335,6 +335,7 @@ the job states are left alone.
 | Control | Type | Behaviour |
 | --- | --- | --- |
 | Verdict badge | Result row + action bar | `no leftovers found` · `N frames still marked` · `not checked`. |
+| Queue row flag | Job row in the sidebar | `N still marked`, beside the state and never instead of it. The state stays accurate about what the plan did; this says how the file turned out. A green `Done` over a render that still carries the mark is exactly the reassurance this check exists to withdraw, so it cannot live only in a panel you have to open. |
 | Jump to first | Click on the badge | Seeks the comparison player to the first flagged frame and selects the region. |
 | Check again | Row action, and in the clip detail | Re-runs the check against the **retained render** — no re-processing of the source. |
 | Run again from leftovers | Button, shown only when leftovers exist | Starts a fresh run on the source with the flagged rectangles seeded as regions. |
@@ -354,9 +355,18 @@ full search of every frame; the pre-flight estimate in [§6](#6-local-first-and-
 includes it. If it is ever expensive enough to be worth skipping, that is an Advanced
 toggle at that point and not before.
 
-**Leftovers are drawn on the timeline** in the same channel as uncovered ranges, in the
-warning colour, so "where is it still marked" is answered by looking rather than by
-stepping.
+**Leftovers are drawn on the timeline**, on their own strip below the track strip
+rather than merged into it. Uncovered ranges are the plan's prediction that it lost the
+mark; leftovers are a measurement of the file that came out. They usually agree, and
+the times they do not are the useful part — one channel in one colour would assert they
+are the same fact.
+
+**Where a range is widened, and where it is not.** The badge and the timeline report
+what the check *confirmed*, never rounded outward. "Run again from leftovers" does
+widen each range backward by one sweep interval, because a region is only a place to
+look and the engine still measures the alpha before removing anything — pointing it
+slightly early costs nothing, and starting late misses frames. Reporting and seeding
+are different acts and the spec keeps them apart deliberately.
 
 ### 5.4 Advanced drawer
 

@@ -284,8 +284,34 @@ async function createWindow(): Promise<void> {
             `written=${final?.result?.written ?? "n/a"} ` +
             `reason=${final?.result?.reason ?? "none"} ` +
             `corrected=${final?.result?.framesCorrected ?? "n/a"} ` +
+            `uncovered=${final?.result?.framesUncovered ?? "n/a"} ` +
+            `stillMarked=${final?.result?.residual?.framesMarked ?? "not-checked"} ` +
+            `leftoverRanges=${
+              final?.result?.residual?.ranges
+                .map((range) => `${range.from}-${range.to}:${range.kind}`)
+                .join("|") || "none"
+            } ` +
             `output=${final?.result?.outputPath ?? "none"}\n`
         )
+
+        // Exercises the re-check through the bridge: preload channel, the worker fork,
+        // and the store write that has to survive the answer coming back.
+        if (process.env["GVOWR_SMOKE_CHECK"] === "1") {
+          const rechecked = await window.webContents.executeJavaScript(
+            `(async () => {
+               const rows = await window.gvowr.listResults()
+               if (rows.length === 0) return "no results"
+               const before = rows[0].residual ? rows[0].residual.framesMarked : "null"
+               const updated = await window.gvowr.checkResult(rows[0].id)
+               return [
+                 "before=" + before,
+                 "after=" + (updated.residual ? updated.residual.framesMarked : "null"),
+                 "checkedFrames=" + (updated.residual ? updated.residual.framesChecked : "n/a"),
+               ].join(" ")
+             })()`
+          ).catch((error: unknown) => `failed: ${String(error)}`)
+          process.stdout.write(`SMOKE recheck ${rechecked}\n`)
+        }
         // Exercises the export path from the renderer's side of the bridge: preload,
         // channel, store, and the copy-verify-delete order that protects the only
         // copy of somebody's render.

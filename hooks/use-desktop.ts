@@ -224,12 +224,16 @@ export function useResults(): {
   exportResult: (id: string) => Promise<void>
   exportResultAs: (id: string) => Promise<void>
   removeResult: (id: string) => Promise<void>
+  /** Ids whose check is running, so the row can say so instead of looking idle. */
+  checking: ReadonlySet<string>
+  checkResult: (id: string) => Promise<void>
   revealResult: (id: string) => Promise<void>
   clearResults: () => Promise<void>
   openFolder: () => Promise<void>
 } {
   const [results, setResults] = useState<StoredResult[]>([])
   const [usage, setUsage] = useState<StorageUsage | null>(null)
+  const [checking, setChecking] = useState<ReadonlySet<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -270,6 +274,22 @@ export function useResults(): {
     }, []),
     exportResultAs: useCallback(async (id: string) => {
       await desktop().exportResultAs(id)
+    }, []),
+    checking,
+    // The store broadcasts the updated row, so there is nothing to merge here — only
+    // the pending flag to clear, and it has to clear on failure too or the row spins
+    // for the rest of the session.
+    checkResult: useCallback(async (id: string) => {
+      setChecking((current) => new Set(current).add(id))
+      try {
+        await desktop().checkResult(id)
+      } finally {
+        setChecking((current) => {
+          const next = new Set(current)
+          next.delete(id)
+          return next
+        })
+      }
     }, []),
     removeResult: useCallback(async (id: string) => desktop().removeResult(id), []),
     revealResult: useCallback(async (id: string) => desktop().revealResult(id), []),

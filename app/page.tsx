@@ -27,6 +27,8 @@ export default function Page() {
     exportResultAs,
     removeResult,
     revealResult,
+    checkResult,
+    checking,
     clearResults,
     openFolder,
   } = useResults()
@@ -85,6 +87,8 @@ export default function Page() {
           onExportAs={(id) => void exportResultAs(id)}
           onRevealResult={(id) => void revealResult(id)}
           onRemoveResult={(id) => void removeResult(id)}
+          onCheckResult={(id) => void checkResult(id)}
+          checkingResults={checking}
         />
 
         {selected ? (
@@ -97,6 +101,8 @@ export default function Page() {
             onReveal={() => void reveal(selected.id)}
             onExport={() => void exportResult(selected.id)}
             onExportAs={() => void exportResultAs(selected.id)}
+            onCheck={() => void checkResult(selected.id)}
+            checking={checking.has(selected.id)}
           />
         ) : (
           <EmptyState system={system} onAdd={() => void addFiles()} />

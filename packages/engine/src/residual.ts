@@ -10,7 +10,7 @@ import {
 } from "./detect.ts"
 import { referenceKernel, toGrayscale, type CorrelationKernel, type Grayscale } from "./correlate.ts"
 import { verifyReversibility, type VerifyOptions, type VerifyResult } from "./verify.ts"
-import type { AlphaMap, Frame, Rect, WatermarkTrack } from "./types.ts"
+import type { AlphaMap, Frame, Rect } from "./types.ts"
 
 /**
  * The residual check: what the finished render still shows.
@@ -62,6 +62,18 @@ const SAME_LEFTOVER_OVERLAP = 0.3
  * alpha problem. A `missed` one is a place the plan never reached at all, which is a
  * discovery problem, and discovery is exactly what the segmenter in §5 is meant to fix.
  */
+/**
+ * The only thing the check needs from a plan: which rectangles were touched, and when.
+ *
+ * Narrower than `WatermarkTrack` on purpose. A `WatermarkTrack` satisfies it, and so
+ * does a plan reloaded from disk long after the run that produced it — which is what
+ * makes re-checking a stored render give the same answer as the run did, rather than
+ * quietly losing the under-shoot question along with the tracker's state.
+ */
+export interface TouchedTrack {
+  readonly frames: ReadonlyMap<number, { readonly rect: Rect }>
+}
+
 export type ResidualKind = "missed" | "under-corrected"
 
 /** A stretch of frames where something still reads as a mark. */
@@ -105,7 +117,7 @@ export interface ResidualOptions {
    * Finding the same fault by sweeping would cost a full-frame search on every frame,
    * which is precisely what neither this pass nor Pass 1 can afford.
    */
-  readonly tracks?: readonly WatermarkTrack[]
+  readonly tracks?: readonly TouchedTrack[]
   readonly sweepInterval?: number
   /**
    * Fused score a sweep hit must reach.

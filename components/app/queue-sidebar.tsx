@@ -32,6 +32,8 @@ export function QueueSidebar({
   onClearFinished,
   onExport,
   onExportAs,
+  onCheckResult,
+  checkingResults,
   onRevealResult,
   onRemoveResult,
 }: {
@@ -44,6 +46,8 @@ export function QueueSidebar({
   onClearFinished: () => void
   onExport: (id: string) => void
   onExportAs: (id: string) => void
+  onCheckResult: (id: string) => void
+  checkingResults: ReadonlySet<string>
   onRevealResult: (id: string) => void
   onRemoveResult: (id: string) => void
 }) {
@@ -107,6 +111,8 @@ export function QueueSidebar({
                 retentionDays={retentionDays}
                 onExport={() => onExport(result.id)}
                 onExportAs={() => onExportAs(result.id)}
+                onCheck={() => onCheckResult(result.id)}
+                checking={checkingResults.has(result.id)}
                 onReveal={() => onRevealResult(result.id)}
                 onRemove={() => onRemoveResult(result.id)}
               />

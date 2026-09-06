@@ -60,6 +60,7 @@ export function JobRow({
   const resting = job.state === "queued" || job.state === "ready"
   const Icon = resting && job.info?.kind === "image" ? ImageIcon : ICONS[job.state]
   const busy = job.state === "analysing" || job.state === "processing"
+  const stillMarked = job.result?.residual?.framesMarked ?? 0
 
   return (
     <button
@@ -91,6 +92,26 @@ export function JobRow({
         {busy && job.progress && (
           <span className="text-[11px] text-muted-foreground tabular">
             {Math.round(job.progress.fraction * 100)}%
+          </span>
+        )}
+        {/*
+          * Sits beside the state rather than replacing it, and the state is not
+          * downgraded to match.
+          *
+          * The two say different things: "Done" is an accurate account of what the
+          * plan did, and this is what the file turned out to look like. But the queue
+          * is where someone scans for what still needs attention, and a green Done
+          * over a render that still carries the mark is precisely the reassurance this
+          * check exists to withdraw — so it cannot only live in the panel you have to
+          * open. See `UI-SPEC.md` §5.10.
+          */}
+        {stillMarked > 0 && (
+          <span
+            className="flex items-center gap-1 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning"
+            title={`Reading the finished file back, ${stillMarked} frame(s) still read as marked`}
+          >
+            <AlertTriangle className="size-2.5" />
+            {stillMarked} still marked
           </span>
         )}
       </div>

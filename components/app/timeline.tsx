@@ -2,7 +2,7 @@
 
 import { Maximize, Minus, Plus } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { ClipMedia, FilmstripWindow, JobResult } from "@gvowr/ipc"
+import type { ClipMedia, FilmstripWindow, JobResult, ResidualSummary } from "@gvowr/ipc"
 
 import { Button } from "@/components/ui/button"
 import { useFilmstripWindow } from "@/hooks/use-desktop"
@@ -62,6 +62,7 @@ export function Timeline({
   frameCount,
   onSeek,
   result,
+  residual,
   playing = false,
 }: {
   className?: string
@@ -74,6 +75,15 @@ export function Timeline({
   frameCount: number
   onSeek: (seconds: number) => void
   result: JobResult | null
+  /**
+   * What the check found in the finished file, drawn on its own strip.
+   *
+   * Deliberately not merged into the track strip above it. Uncovered frames are the
+   * plan's own prediction that it lost the mark; these are a measurement of the file
+   * that came out. They usually agree, and when they do not the disagreement is the
+   * useful part — one channel in one colour would say they are the same fact.
+   */
+  residual: ResidualSummary | null
   /**
    * True while the clip is playing.
    *
@@ -364,6 +374,22 @@ export function Timeline({
           </div>
         )}
 
+        {residual && residual.framesMarked > 0 && (
+          <div className="relative h-1.5 w-full overflow-hidden bg-muted/40">
+            {residual.ranges.map((range) => (
+              <div
+                key={`residual-${range.from}-${range.to}`}
+                className="absolute inset-y-0 bg-warning"
+                style={{
+                  left: `${percent(frameTime(range.from))}%`,
+                  width: `${Math.max(0.4, ((frameTime(range.to + 1) - frameTime(range.from)) / span) * 100)}%`,
+                }}
+                title={`Frames ${range.from}–${range.to}: the finished file still reads as marked here (${range.kind})`}
+              />
+            ))}
+          </div>
+        )}
+
         <div
           aria-hidden
           className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-primary shadow-[0_0_6px_var(--primary)]"
@@ -386,6 +412,11 @@ export function Timeline({
               there, these have plausible ones. */}
           {result.framesFilled > 0 && (
             <Legend className="bg-track-roaming">Filled {result.framesFilled}</Legend>
+          )}
+          {residual && residual.framesMarked > 0 && (
+            <Legend className="bg-warning">
+              Checked: {residual.framesMarked} still marked
+            </Legend>
           )}
           <span className="ml-auto">
             {result.tracksFound} watermark{result.tracksFound === 1 ? "" : "s"} tracked
