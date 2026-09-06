@@ -300,6 +300,149 @@ frames were left alone rather than silently passing.
 Reverse blend per track per frame, optional FDnCNN denoise on touched ROIs only,
 re-encode at CRF 14 / preset slow with audio stream-copied.
 
+### Pass 4 — The residual check
+
+The render is decoded once more and the detector is run over it. Anything that still
+scores as a mark is a **leftover**: a frame the plan never covered, a track that ended
+a shot early, a region the verifier declined, or a correction that under-shot.
+
+It costs one extra decode and no re-encode, because it changes nothing. This pass
+reports; it never edits. What it produces is a count and a set of frame ranges, which
+the results row shows against the render it belongs to.
+
+**A full sweep of every frame is not affordable, and is not needed.** The check asks two
+separate questions, each with its own cost:
+
+| Question | How | Cost |
+| --- | --- | --- |
+| Did a correction under-shoot? | Re-score the template at the rectangle the plan already touched, on every frame it touched. | Local, no search. Effectively free. |
+| Was a mark missed entirely? | Full-frame sweep every Nth frame and on every scene cut, exactly as Pass 1 bounds its own sweep. | Bounded and tunable. |
+
+Sampling is sound for the second question because a mark that is present is present for
+many consecutive frames — the case Pass 4 exists to catch is a whole shot the tracker
+never covered, not a single stray frame. A leftover found at a sampled frame is then
+walked outward frame by frame to find its true extent, so the reported range is exact
+even though the search was not.
+
+Two further details matter:
+
+- **It sweeps at the discovery bar, not the tracking bar.** A leftover has no track
+  history to lend it credibility — it is exactly the "admit a mark on this frame's
+  evidence alone" decision that [§4](#our-differentiator--the-roaming-watermark) sets
+  the higher bar for.
+- **It runs against the retained render**, not against a fresh run of the source. The
+  results store keeps every render until the user exports it, so a clip can be checked
+  — or re-checked with a better detector — without reprocessing anything.
+
+This pass is also **the measuring stick for everything below**. A detector that claims
+to find marks the current one misses has to show it as a lower residual on the fixture
+corpus, and without this pass there is no number to beat.
+
+### The AI layer — a proposal source, never a painter
+
+A model earns its place here by **finding**, not by fixing. The split is not deference
+to the no-ML rule; it is where the two technologies are actually good.
+
+**What a vision-language model cannot do.** Gemini, GPT-4o and the local Qwen-VL class
+describe a frame in text. They do not emit pixels, their localisation is a coarse box
+tens of pixels from the truth, and the same frame asked twice gives two answers. None
+of that can feed arithmetic that needs the mark's position to the pixel.
+
+**What a generative inpainter cannot do.** Diffusion editing does emit pixels, and
+invents different ones on every frame. Across 1800 frames the patched region boils —
+visibly wrong in motion while every single frame looks fine paused — and it costs
+gigabytes in the installer. It also fails the rule in [§2.1](#21-the-fallback-for-where-the-maths-cannot-go)
+on its own terms: it is invention presented as recovery.
+
+**What a segmentation model can do, that nothing here currently does.** Template
+correlation asks "does this 48 px patch resemble my diamond" and cannot use anything
+outside the patch. That is why the genuine roaming mark in the [§2.2](#22-why-a-hand-drawn-region-is-not-held-to-a-stricter-bar)
+table scores **0.20** against a discovery bar of **0.6** — a real mark the sweep will
+not start a track on, and a bar that cannot be lowered without admitting the sparkles
+and lettering that score above it. A segmentation net sees the whole frame, learns what
+*compositing* looks like rather than what the logo looks like, and returns a per-pixel
+probability map instead of a score at a box. Closing that gap is the one thing a model
+buys us that no amount of threshold tuning will.
+
+**Training data is free here, which is unusual.** We know the compositing equation and
+we own a measured alpha template ([§2](#2-the-core-algorithm--reverse-alpha-blending)),
+so clean footage plus the template generates pixel-exact ground truth at random
+positions, scales, intensities and rotations, in unlimited quantity. No labelling, no
+dataset licence, no annotation budget. Because the task is narrow — one logo family —
+the net is a few megabytes rather than a few gigabytes.
+
+#### How it attaches
+
+The model is a **candidate source feeding Pass 1**, in parallel with the NCC sweep.
+Everything downstream is untouched: `verify.ts` still gates it, the tracker still
+demands persistence, `blend.ts` still does the arithmetic. **The model never writes a
+pixel.** It says where to look, and a proposal that will not invert is refused exactly
+as an NCC candidate is.
+
+```
+Pass 1  decode -> [ NCC sweep  ] --+
+                  [ segmenter  ] --+-> candidates -> verify -> track -> plan
+Pass 2  decode -> renderFrame(plan) -> encode
+Pass 4  decode render -> detector / segmenter -> residual report
+```
+
+The two ways a user asks for this are the same machinery with a different switch, and
+deliberately **not** a second pipeline — two pipelines mean two quality bars, two sets
+of bugs, and honest-failure guarantees that hold in only one of them:
+
+| The user asks | What runs |
+| --- | --- |
+| Remove it, then check | Passes 1–2 as today, then Pass 4. Leftovers offer a second run seeded by them. |
+| Use the AI | The segmenter is a proposal source from frame one; the sweep corroborates rather than discovers. |
+
+#### Rules, in the shape of §2.1
+
+1. **The model proposes; the verifier disposes.** No model output reaches pixels
+   without passing the same reversibility test as everything else.
+2. **It is not the default path.** The analytical sweep is what the tool is, and prior
+   art's failure was an ML component **on by default** that made some clips worse
+   ([§3](#a-useful-negative-result)). The segmenter is enabled per run.
+3. **It ships only if it measures better.** Lower residual on the fixture corpus than
+   the sweep alone, on the roaming mark that scores 0.20. If it does not, the numbers
+   get recorded here and the model does not ship.
+4. **Nothing leaves the machine.** Inference is local, on the bundled runtime. There is
+   no cloud path, and [§7](#7-diagnostics-telemetry--user-feedback) already forbids
+   transmitting frames under any consent tier.
+
+#### Repair, ranked
+
+Finding is where the model goes. Fixing keeps the existing order of preference, and a
+model enters only at the bottom:
+
+1. **Temporal borrowing** — the covered content is usually unobstructed in a
+   neighbouring frame, so a motion-compensated copy is *recovery*. Deterministic, no
+   model, and strictly better than anything below it for video. Scheduled as Phase 4d.
+2. **Exemplar synthesis** — [§2.1](#21-the-fallback-for-where-the-maths-cannot-go), as
+   built. The answer for stills, and for frames where nothing moved and there is
+   nothing to borrow.
+3. **A feed-forward inpainter** (LaMa / MI-GAN class, ONNX) — deterministic given the
+   same input, tens to hundreds of megabytes. Only if 1 and 2 measurably fall short.
+4. **Diffusion** — no. Flicker, non-determinism, and invention at gigabyte cost.
+
+#### What this costs the project
+
+- **Runtime:** `onnxruntime-node` (1.29.0), prebuilt for darwin, win32 and linux —
+  already the recorded choice in [§6](#6-technology-decisions) for optional denoise, so
+  this adds a model rather than a dependency argument.
+- **A Python side to the repo.** Data synthesis, training and ONNX export live in
+  `scripts/train/` and are **never packaged**; only the exported `.onnx` ships. This is
+  the one place the repo stops being TypeScript-only, and it is a deliberate trade for
+  a model that fits our mark exactly rather than a generic off-the-shelf one whose
+  licence and accuracy we would both have to take on faith.
+- **Distribution of the weights** is undecided — bundled if the net stays small enough,
+  otherwise fetched once with a checksum and explicit consent. Recorded in
+  [§9](#decisions-still-to-be-made).
+
+**What is not on the table:** decoding frames to image files on disk to hand to a model
+and swapping them back. A 60 s 1080p clip is ~1800 frames and several gigabytes of
+churn per run, for no gain — frames already flow through a raw pipe in memory, and the
+model reads that stream.
+
 ### Still images — the same engine, one frame
 
 A Gemini image carries the same kind of composited overlay as a Veo clip, so it needs
@@ -499,6 +642,15 @@ Both paths emit the same payload so triage stays uniform.
 - [ ] **Phase 4b — Still images.** Image I/O through the FFmpeg sidecar, the single-frame
       path through the existing engine, queue and UI support for stills alongside clips.
       *No new algorithm — the engine already works one frame at a time.*
+- [ ] **Phase 4c — The residual check.** Pass 4 over the retained render, leftover count
+      and frame ranges on the results row, re-check on demand. *No model.* It ships first
+      because it is the measuring stick every later claim is judged against.
+- [ ] **Phase 4d — Temporal borrowing.** Motion-compensated recovery from neighbouring
+      frames for regions the exact path declined. Recovery, not synthesis, so it ranks
+      above the spatial fill for video and takes its place as the default fallback there.
+- [ ] **Phase 4e — The segmenter, opt-in.** `scripts/train/` data synthesis and training,
+      ONNX export, `onnxruntime-node` inference as a Pass 1 candidate source. *Ships only
+      if it lowers the Phase 4c residual on the fixture corpus.*
 - [ ] **Phase 5 — Diagnostics & feedback.** Report composer, review dialog, ROI-crop
       attachment, Settings > Diagnostics page, `PRIVACY.md`, GitHub-issue transport.
       *Tier 1 structured logging is built in Phase 1, not deferred to here* — the
@@ -518,6 +670,10 @@ Both paths emit the same payload so triage stays uniform.
   until there is real demand? (GitHub-only is the lower-risk start — no infrastructure,
   no retention obligations, no `PRIVACY.md` endpoint claims to keep accurate.)
 - Retention window for the direct endpoint, if we build it.
+- Segmenter weight distribution: bundled in the installer, or fetched once on first use
+  with a checksum and explicit consent? Bundling is simpler and keeps the app genuinely
+  offline; fetching keeps three installers smaller. Decide when the trained net has a
+  real size.
 
 ### Dependency versions currently pinned back
 
@@ -534,7 +690,13 @@ peer conflicts rather than caution. Re-check both when `eslint-config-next` upda
 - **Temporal fill for video is not built.** Where a mark cannot be inverted on one frame,
   a neighbouring frame very often shows the same content unobstructed — motion-compensated
   borrowing would put *real* pixels there rather than synthesised ones, which is strictly
-  better than the spatial fill in §2.1 and belongs ahead of it for clips.
+  better than the spatial fill in §2.1 and belongs ahead of it for clips. Now scheduled as
+  Phase 4d rather than left open.
+
+- **Nothing measures what removal left behind.** Every count the app reports is a count of
+  what the plan *decided* — corrected, skipped, filled — and none of them look at the
+  finished picture. A clip can report 231 corrected and still carry a visible mark on a
+  shot the tracker never covered. Pass 4 is the fix and is scheduled as Phase 4c.
 
 - **A 4K still takes 13 s**, nearly all of it the full-resolution sweep across candidate
   sizes. A coarse pass at reduced resolution followed by a full-resolution refinement is

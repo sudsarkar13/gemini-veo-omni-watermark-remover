@@ -291,7 +291,8 @@ The reason is that a removal is a draft until somebody has looked at it. Writing
 `clip_clean.mp4` beside `clip.mp4` the moment a run finishes fills the user's folders
 with files they have not inspected, and makes "try it again with Fill on" leave litter
 behind. Keeping the result in the app also means it is still there to be re-examined —
-which is what the later vision pass will need (`PLAN.md` §11).
+which is what the residual check and the vision pass both need
+(`PLAN.md` §5, *The AI layer*).
 
 | Control | Type | Behaviour |
 | --- | --- | --- |
@@ -315,6 +316,47 @@ fileless and are kept as history.
 
 **The action bar after a run** reads `Kept in the app · 41 MB · clears in 30 days` with
 `Reveal` and `Export`. It never says "Saved to …" for a file the user has not asked for.
+
+### 5.10 The residual check — what the render actually shows
+
+Every count the app currently reports is a count of what the engine *decided*:
+corrected, left untouched, filled. None of them look at the finished picture. A clip
+can honestly report "231 corrected" and still carry a visible mark through a shot the
+tracker never covered, and today nothing in the UI would say so.
+
+The residual check looks at the render itself and reports what still reads as a mark.
+
+**It is a property of the result, not a job state.** The states in [§7](#7-job-state-machine)
+describe what the plan did; this describes what the picture looks like afterwards, and
+the interesting case — `done`, nothing skipped, mark still visible — is precisely the
+one a fourth `done-with-…` state could not express. So it is a badge on the result, and
+the job states are left alone.
+
+| Control | Type | Behaviour |
+| --- | --- | --- |
+| Verdict badge | Result row + action bar | `no leftovers found` · `N frames still marked` · `not checked`. |
+| Jump to first | Click on the badge | Seeks the comparison player to the first flagged frame and selects the region. |
+| Check again | Row action, and in the clip detail | Re-runs the check against the **retained render** — no re-processing of the source. |
+| Run again from leftovers | Button, shown only when leftovers exist | Starts a fresh run on the source with the flagged rectangles seeded as regions. |
+
+**The badge never claims the picture is clean.** It reads `no leftovers found`, because
+that is what was established — the detector looked and found nothing. `clean` would be
+a claim about the picture that this tool is not in a position to make, and the same
+rule that makes the engine report skipped frames applies to the thing that inspects
+them.
+
+**When it runs.** Automatically at the end of every run, and on demand from the row.
+It is reported as its own progress phase — `checking` — after `rendering`, so a user
+watching the meters is never left wondering what the extra pass is.
+
+**Cost is bounded, and shown.** The check is a third decode with a sampled sweep, not a
+full search of every frame; the pre-flight estimate in [§6](#6-local-first-and-the-resource-contract)
+includes it. If it is ever expensive enough to be worth skipping, that is an Advanced
+toggle at that point and not before.
+
+**Leftovers are drawn on the timeline** in the same channel as uncovered ranges, in the
+warning colour, so "where is it still marked" is answered by looking rather than by
+stepping.
 
 ### 5.4 Advanced drawer
 
@@ -485,11 +527,19 @@ Every action must be reachable without the keyboard. Nothing is shortcut-only.
 Recorded so these get re-argued rather than quietly re-added:
 
 - **A general video editor.** No trimming, filters, colour correction, or transitions.
-- **Brush / manual inpainting.** Contradicts the exact-math premise (`PLAN.md` §2).
-- **Cloud processing or accounts.** Local-only is the product.
+- **Brush / manual inpainting.** A brush the user paints removal with contradicts the
+  exact-math premise (`PLAN.md` §2). The automatic fill in §5.8 is a different thing: it
+  is bounded to regions the verifier declined, opt-in, and counted separately.
+- **Cloud processing or accounts.** Local-only is the product. This covers AI too: no
+  hosted vision model, no API key field, no frame leaving the machine for any reason.
+- **Generative editing of the picture.** A model may propose *where* the mark is
+  (`PLAN.md` §5, *The AI layer*); it never paints. Diffusion-based repair is refused on
+  quality grounds as well as principle — it flickers across frames.
 - **A built-in updater UI beyond "check for updates."**
 - **Per-clip presets library.** Defaults plus the Advanced drawer cover it; revisit only
   with real evidence that people re-enter the same settings.
-- **Image support.** Video is the scope for v1. Prior art covers images well.
+- ~~**Image support.**~~ **Built** (§5.7). The reasoning here was that prior art covers
+  images well, which turned out to be beside the point — the engine already works one
+  frame at a time, so stills cost I/O and UI rather than an algorithm.
 - **Timeline editing of tracks by hand** (dragging segments to retime). Manual region
   covers the real need at a fraction of the complexity.
