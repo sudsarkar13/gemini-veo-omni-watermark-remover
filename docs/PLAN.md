@@ -93,6 +93,46 @@ against it were meaningless, which was demonstrated the hard way — see §9.
 The only irrecoverable case is a pixel that clipped at 255 under the mark; that
 information is genuinely gone.
 
+### 2.1 The fallback, for where the maths cannot go
+
+Reverse blending recovers the pixels that were actually there. Nothing else in this
+document does, and nothing else should be preferred to it.
+
+But there are regions it cannot serve: a mark the verifier finds and cannot invert,
+a frame where the correction would punch a hole rather than restore content, a clipped
+patch where the original information is gone. Today those are left untouched and
+reported, which is honest and leaves a visible watermark on the picture.
+
+**A fill is offered for exactly those regions, and only those.** It synthesises plausible
+pixels from the surrounding image — it does not recover anything — and it is therefore
+governed by three rules that are not negotiable:
+
+1. **Off by default.** It is enabled per run, in Advanced, by someone who has read what
+   it does. The analytical path is what the tool is.
+2. **Only where the exact path declined.** It never runs on a region that inverted
+   cleanly, and it never runs where nothing was found — an unfound mark has no rectangle,
+   and filling a guess would be vandalism with extra steps.
+3. **Counted and named, never folded into the total.** "231 corrected, 4 filled" is the
+   report. A filled frame is not a corrected frame and the UI never says it is.
+
+This satisfies the project's rule rather than bending it: the rule is *never invent
+pixels **silently***, and prior art's failure was an ML predictor **on by default** that
+made some clips worse. A labelled, opt-in, counted fallback for regions that would
+otherwise keep their watermark is a different thing from either.
+
+**The method is exemplar-based synthesis (Criminisi et al.), not diffusion and not ML.**
+Diffusion-based fills (Telea, Navier–Stokes) blur across the hole, which on the engraved,
+lettered content this tool is used on looks obviously wrong. Exemplar synthesis copies
+real patches from the surrounding image in an order that continues edges into the hole
+first, so structure survives. It is classical, deterministic, and adds no model, no
+weights, and nothing to the download.
+
+**For video there is a better fallback still, and it is not this one.** A clip usually
+contains the covered content unobstructed in a neighbouring frame, so borrowing those
+pixels is recovery rather than invention. That is a stronger tool and it is not built
+yet; it is recorded in §9 as the next thing to build here, so the spatial fill does not
+quietly become the answer for video when it is really the answer for stills.
+
 ---
 
 ## 3. Prior art — what exists and where it fails
@@ -460,6 +500,11 @@ peer conflicts rather than caution. Re-check both when `eslint-config-next` upda
 | `typescript` | 5.9.3 | 7.0.2 | `typescript-eslint@8.69.0` requires `>=4.8.4 <6.1.0`. TypeScript 6 is beta-only, so 5.9.3 is the newest stable that satisfies it. |
 
 ### Known costs not yet paid down
+
+- **Temporal fill for video is not built.** Where a mark cannot be inverted on one frame,
+  a neighbouring frame very often shows the same content unobstructed — motion-compensated
+  borrowing would put *real* pixels there rather than synthesised ones, which is strictly
+  better than the spatial fill in §2.1 and belongs ahead of it for clips.
 
 - **A 4K still takes 13 s**, nearly all of it the full-resolution sweep across candidate
   sizes. A coarse pass at reduced resolution followed by a full-resolution refinement is

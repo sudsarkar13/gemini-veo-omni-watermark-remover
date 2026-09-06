@@ -261,6 +261,26 @@ cannot be edited without re-encoding the whole image, so the result card says so
 words — "re-encoded at maximum quality; pixels outside the mark change slightly" —
 rather than implying an edit as surgical as the PNG case.
 
+### 5.8 The fill, and how it must be presented
+
+Every other part of this tool recovers the pixels that were there. The fill does not: it
+makes up plausible ones from the surrounding image. That difference is the whole of its
+UI design.
+
+- **The control is off by default** and lives in Advanced, worded as what it does —
+  "Fill what cannot be removed" — never as "improve" or "enhance".
+- **It applies only where the exact path declined**: a region found and not invertible.
+  It never runs where nothing was found, because an unfound mark has no rectangle and a
+  fill over a guess is damage.
+- **The result counts it separately.** "231 corrected · 4 filled", with filled frames
+  drawn in their own colour on the timeline — the same treatment as untouched frames,
+  because the user needs to find them just as much.
+- **The word is "filled", never "fixed" or "cleaned".** A filled region is the one place
+  in the output the tool cannot vouch for, and it says so in the same breath as reporting
+  it.
+- On a still, the fill needs a region: it runs where a mark was found and refused, or
+  where the user drew one by hand and the engine could not invert it.
+
 ### 5.4 Advanced drawer
 
 Collapsed by default. Open state persists per user, not per clip. Nothing in here is
@@ -274,6 +294,7 @@ required for a successful run.
 | Lock alpha per clip | Toggle | Off | Disables per-frame adaptation. For clips where auto-tuning misbehaves. |
 | Mark variant | Select | Auto | Auto · the known template variants. |
 | Sweep interval | Number | 15 | Frames between full-frame searches. Higher = faster, may miss brief marks. |
+| Fill what cannot be removed | Toggle | **Off** | Synthesises pixels from the surroundings for regions the exact path declined. Off by default, labelled as invented rather than recovered, and counted separately in the result — never folded into "corrected". See §5.8. |
 | Denoise | Select | Auto | `Off` · `Soft` · `Auto` · `Strong`. |
 | Denoise sigma | Slider | Auto | `0 – 60`. Auto resolves per resolution; ~15 suits animation. |
 | Output codec | Select | H.264 | H.264 · H.265. |
