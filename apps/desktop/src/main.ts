@@ -16,13 +16,20 @@ import type { BrowserWindow as BrowserWindowInstance } from "electron"
 
 const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = electron
 
-import { extractFilmstrip, extractWaveform, probe, resolveBinaries } from "@gvowr/video"
+import {
+  extractFilmstrip,
+  extractWaveform,
+  probe,
+  resolveBinaries,
+  type VideoInfo,
+} from "@gvowr/video"
 
 import {
   ACCEPTED_EXTENSIONS,
   CHANNELS,
   EVENTS,
   type ClipMedia,
+  type FilmstripWindow,
   type Job,
   type JobOptions,
   type JobProgress,
@@ -112,6 +119,21 @@ protocol.registerSchemesAsPrivileged([
 
 let window: BrowserWindowInstance | null = null
 const mediaCache = new Map<string, ClipMedia>()
+
+/**
+ * Zoomed filmstrip windows, keyed by job and window.
+ *
+ * Bounded because each window is a few dozen JPEGs on disk: a long session of
+ * scrubbing a long clip would otherwise fill the temp directory one zoom at a time.
+ * The files themselves are cleaned up with the rest of the job's thumbnails.
+ */
+const filmstripCache = new Map<string, FilmstripWindow>()
+/** Probe results, so opening a window does not re-probe the file every time. */
+const probeCache = new Map<string, VideoInfo>()
+const MAX_CACHED_WINDOWS = 12
+const MAX_WINDOW_THUMBNAILS = 60
+/** Makes each window's filenames unique inside the job's one thumbnail directory. */
+let filmstripSequence = 0
 let queue: JobQueue
 let settings: SettingsStore
 
@@ -333,6 +355,77 @@ function registerHandlers(): void {
       }
     }
   })
+
+  /**
+   * A denser strip over one window of the clip, for a zoomed timeline.
+   *
+   * Windows are cached per job and evicted oldest-first: zooming and scrubbing walks
+   * over the same few windows repeatedly, and re-running FFmpeg for a window that is
+   * already on disk would make the timeline feel slower the more it is used.
+   *
+   * Every window lands in the job's existing thumbnail directory under its own file
+   * prefix, so the media protocol serves them through the same registry entry and no
+   * new path is ever exposed to the renderer.
+   */
+  ipcMain.handle(
+    CHANNELS.jobsFilmstrip,
+    async (
+      _event,
+      id: string,
+      fromSeconds: number,
+      toSeconds: number,
+      count: number
+    ): Promise<FilmstripWindow | null> => {
+      const job = queue.list().find((candidate) => candidate.id === id)
+      if (!job) return null
+
+      const wanted = Math.max(4, Math.min(Math.round(count) || 4, MAX_WINDOW_THUMBNAILS))
+      const from = Math.max(0, fromSeconds)
+      const span = Math.max(0.02, toSeconds - from)
+      const key = `${id}:${from.toFixed(2)}:${span.toFixed(2)}:${wanted}`
+
+      const cached = filmstripCache.get(key)
+      if (cached) return cached
+
+      try {
+        const directory = join(app.getPath("temp"), "gvowr-thumbs", id)
+        let meta = probeCache.get(id)
+        if (!meta) {
+          meta = await probe(job.inputPath)
+          probeCache.set(id, meta)
+        }
+        const window = await extractFilmstrip(job.inputPath, directory, meta, {
+          count: wanted,
+          width: 160,
+          startSeconds: from,
+          durationSeconds: span,
+          // The clip-wide strip lives in this directory too, and re-extracting a
+          // window must not delete it.
+          prefix: `w${filmstripSequence++}`,
+          replace: false,
+        })
+        setMediaThumbnails(id, window.directory)
+
+        const result: FilmstripWindow = {
+          thumbnails: window.frames.map((frame) => thumbnailUrl(id, basename(frame))),
+          fromSeconds: window.startSeconds,
+          toSeconds: window.startSeconds + window.durationSeconds,
+          interval: window.interval,
+        }
+
+        filmstripCache.set(key, result)
+        // Insertion-ordered, so the first key is the oldest.
+        for (const stale of [...filmstripCache.keys()].slice(0, filmstripCache.size - MAX_CACHED_WINDOWS)) {
+          filmstripCache.delete(stale)
+        }
+        return result
+      } catch {
+        // The timeline falls back to stretching the clip-wide strip, which is worse
+        // but not wrong. A window that cannot be sampled is not a failed job.
+        return null
+      }
+    }
+  )
 
   ipcMain.handle(CHANNELS.systemInfo, async (): Promise<SystemInfo> => {
     let ffmpegAvailable = true

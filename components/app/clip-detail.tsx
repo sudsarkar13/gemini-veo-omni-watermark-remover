@@ -126,6 +126,7 @@ export function ClipDetail({
         {media && (
           <Timeline
             className="shrink-0"
+            jobId={job.id}
             media={media}
             duration={duration || (job.info?.durationSeconds ?? 0)}
             currentTime={currentTime}

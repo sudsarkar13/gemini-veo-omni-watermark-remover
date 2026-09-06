@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react"
 
-import type { ClipMedia, Job, JobOptions, Settings, SystemInfo } from "@gvowr/ipc"
+import type {
+  ClipMedia,
+  FilmstripWindow,
+  Job,
+  JobOptions,
+  Settings,
+  SystemInfo,
+} from "@gvowr/ipc"
 import { DEFAULT_SETTINGS } from "@gvowr/ipc"
 
 import { desktop } from "@/lib/desktop"
@@ -157,3 +164,47 @@ export function useClipMedia(jobId: string | null, resultKey: string | null): Cl
 
   return loaded && loaded.jobId === jobId ? loaded.media : null
 }
+
+/**
+ * A denser filmstrip for the window the timeline is currently showing.
+ *
+ * Requests are debounced and the previous window is kept until the next one arrives,
+ * so scrubbing a zoomed timeline neither floods the main process with FFmpeg runs nor
+ * blinks the strip empty between them. Null means "nothing better than the clip-wide
+ * strip is available" — the caller falls back to that rather than showing a gap.
+ */
+export function useFilmstripWindow(
+  jobId: string | null,
+  request: { fromSeconds: number; toSeconds: number; count: number } | null
+): FilmstripWindow | null {
+  const [window, setWindow] = useState<{ jobId: string; strip: FilmstripWindow } | null>(null)
+
+  // Primitives rather than the object, so an identical request re-created on every
+  // render does not re-trigger the effect.
+  const from = request?.fromSeconds ?? 0
+  const to = request?.toSeconds ?? 0
+  const count = request?.count ?? 0
+  const wanted = request !== null
+
+  useEffect(() => {
+    if (!jobId || !wanted) return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      void desktop()
+        .getFilmstrip(jobId, from, to, count)
+        .then((strip) => {
+          if (!cancelled && strip) setWindow({ jobId, strip })
+        })
+    }, FILMSTRIP_DEBOUNCE_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [jobId, wanted, from, to, count])
+
+  if (!wanted) return null
+  return window && window.jobId === jobId ? window.strip : null
+}
+
+/** Long enough that a drag across the timeline asks for one window, not thirty. */
+const FILMSTRIP_DEBOUNCE_MS = 180

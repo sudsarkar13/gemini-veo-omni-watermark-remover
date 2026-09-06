@@ -104,6 +104,22 @@ export interface ClipMedia {
   readonly aspectRatio: number
 }
 
+/**
+ * A denser filmstrip over part of the clip, fetched when the timeline zooms in.
+ *
+ * The clip-wide strip in `ClipMedia` is fixed at a couple of dozen pictures. Zoomed to
+ * a second of video that strip has nothing left to show, so the timeline asks for the
+ * window it is actually displaying and the main process samples it directly.
+ */
+export interface FilmstripWindow {
+  readonly thumbnails: readonly string[]
+  /** The window actually sampled, which may be clamped to the clip. */
+  readonly fromSeconds: number
+  readonly toSeconds: number
+  /** Seconds of video each thumbnail represents. */
+  readonly interval: number
+}
+
 export interface Job {
   readonly id: string
   readonly inputPath: string
@@ -191,6 +207,7 @@ export const CHANNELS = {
   jobsCancel: "jobs:cancel",
   jobsReveal: "jobs:reveal",
   jobsMedia: "jobs:media",
+  jobsFilmstrip: "jobs:filmstrip",
   systemInfo: "system:info",
   settingsGet: "settings:get",
   settingsSet: "settings:set",
@@ -216,6 +233,13 @@ export interface DesktopApi {
   cancelJob(id: string): Promise<void>
   revealOutput(id: string): Promise<void>
   getMedia(id: string): Promise<ClipMedia | null>
+  /** Thumbnails for one window of the clip. Null when the clip cannot be sampled. */
+  getFilmstrip(
+    id: string,
+    fromSeconds: number,
+    toSeconds: number,
+    count: number
+  ): Promise<FilmstripWindow | null>
   systemInfo(): Promise<SystemInfo>
   getSettings(): Promise<Settings>
   setSettings(partial: Partial<Settings>): Promise<Settings>

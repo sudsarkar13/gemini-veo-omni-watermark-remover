@@ -1,8 +1,11 @@
 "use client"
 
-import { useCallback, useRef } from "react"
-import type { ClipMedia, JobResult } from "@gvowr/ipc"
+import { Maximize, Minus, Plus } from "lucide-react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import type { ClipMedia, FilmstripWindow, JobResult } from "@gvowr/ipc"
 
+import { Button } from "@/components/ui/button"
+import { useFilmstripWindow } from "@/hooks/use-desktop"
 import { formatTimecode } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -17,9 +20,42 @@ import { cn } from "@/lib/utils"
  * The detection lane is the visible form of what the engine actually models: a set of
  * tracks through time rather than one fixed rectangle. Frames deliberately left
  * untouched are drawn distinctly instead of being folded into a clean-looking whole.
+ *
+ * Zooming shows a window of the clip rather than the whole of it. At fit, a ten-second
+ * clip gives every frame about four pixels and a five-frame gap is a smear; the window
+ * is what makes "frames 235–239" a thing you can actually point at. The playhead stays
+ * centred while zoomed, so the window follows playback instead of the picture jumping
+ * a screen at a time.
  */
+
+/**
+ * Tightest window, in seconds of video.
+ *
+ * A window under about half a second is all playhead and no context — and the strip
+ * cannot resolve past one thumbnail per frame anyway.
+ */
+const MIN_WINDOW_SECONDS = 0.5
+/** Roughly how many pixels of strip each thumbnail should occupy. */
+const THUMBNAIL_PITCH = 84
+/** Ceiling on how many thumbnails one window may ask for. Matches the main process. */
+const MAX_WINDOW_THUMBNAILS = 60
+const ZOOM_STEP = 1.6
+/** One notch of a wheel is ~100 deltaY; this makes that about a 12% change. */
+const WHEEL_SENSITIVITY = 0.0011
+
+/** One picture of the strip, placed by the moment it represents. */
+interface StripFrame {
+  /** Position in the strip it came from. The React key: a window may sample the same
+   * file twice near the end of a clip, and two children cannot share a key. */
+  readonly index: number
+  readonly src: string
+  readonly from: number
+  readonly to: number
+}
+
 export function Timeline({
   className,
+  jobId,
   media,
   duration,
   currentTime,
@@ -28,6 +64,8 @@ export function Timeline({
   result,
 }: {
   className?: string
+  /** Needed to ask for a denser strip over the visible window. */
+  jobId: string
   media: ClipMedia
   duration: number
   currentTime: number
@@ -37,6 +75,86 @@ export function Timeline({
   result: JobResult | null
 }) {
   const stripRef = useRef<HTMLDivElement>(null)
+  const [zoom, setZoom] = useState(1)
+  const [stripWidth, setStripWidth] = useState(0)
+
+  const clip = duration > 0 ? duration : 1
+  const fps = frameCount > 0 && clip > 0 ? frameCount / clip : 0
+  const maxZoom = Math.max(1, clip / MIN_WINDOW_SECONDS)
+  const zoomed = zoom > 1.001
+
+  /**
+   * The visible window, centred on the playhead and clamped to the clip.
+   *
+   * Derived rather than stored: a stored window would need an effect to follow the
+   * playhead, and the two would disagree for a frame every time either changed.
+   */
+  const span = Math.min(clip, clip / zoom)
+  const from = Math.max(0, Math.min(currentTime - span / 2, clip - span))
+  const to = from + span
+
+  const percent = useCallback(
+    (seconds: number): number => ((seconds - from) / span) * 100,
+    [from, span]
+  )
+  /** Frame indices are placed through time, so a gap lands where it actually is. */
+  const frameTime = useCallback(
+    (frame: number): number => (frame / (frameCount > 0 ? frameCount : 1)) * clip,
+    [frameCount, clip]
+  )
+
+  useLayoutEffect(() => {
+    const element = stripRef.current
+    if (!element) return
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) setStripWidth(entry.contentRect.width)
+    })
+    observer.observe(element)
+    setStripWidth(element.getBoundingClientRect().width)
+    return () => observer.disconnect()
+  }, [])
+
+  /**
+   * The window asked of the main process is wider than the one on screen, and its
+   * start is quantised.
+   *
+   * Both for the same reason: the displayed window moves with every frame of playback,
+   * and requesting exactly what is displayed would re-run FFmpeg continuously and
+   * still arrive late. Asking for a quantised window twice the width means most
+   * playhead movement is already covered by the strip in hand.
+   */
+  const step = span / 2
+  const requestedFrom = zoomed ? Math.max(0, Math.floor((from - span / 2) / step) * step) : 0
+  const requestedTo = zoomed ? Math.min(clip, requestedFrom + span * 2) : 0
+  const requestedCount = Math.max(
+    4,
+    Math.min(MAX_WINDOW_THUMBNAILS, Math.round((stripWidth * 2) / THUMBNAIL_PITCH) || 4)
+  )
+  const dense = useFilmstripWindow(
+    jobId,
+    zoomed && stripWidth > 0
+      ? { fromSeconds: requestedFrom, toSeconds: requestedTo, count: requestedCount }
+      : null
+  )
+
+  const frames = visibleFrames(dense, media, clip, from, to)
+
+  // Wheel zoom is attached by hand: React's wheel listener is passive, so
+  // preventDefault through onWheel is ignored and the pane scrolls instead.
+  useEffect(() => {
+    const element = stripRef.current
+    if (!element) return
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) return
+      event.preventDefault()
+      setZoom((prev) =>
+        Math.max(1, Math.min(maxZoom, prev * Math.exp(-event.deltaY * WHEEL_SENSITIVITY)))
+      )
+    }
+    element.addEventListener("wheel", onWheel, { passive: false })
+    return () => element.removeEventListener("wheel", onWheel)
+  }, [maxZoom])
 
   const seekFromEvent = useCallback(
     (event: React.MouseEvent) => {
@@ -44,18 +162,18 @@ export function Timeline({
       if (!element || duration <= 0) return
       const bounds = element.getBoundingClientRect()
       const fraction = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width))
-      onSeek(fraction * duration)
+      onSeek(from + fraction * span)
     },
-    [duration, onSeek]
+    [duration, from, span, onSeek]
   )
 
-  const playheadPercent = duration > 0 ? (currentTime / duration) * 100 : 0
+  const changeZoom = (factor: number): void =>
+    setZoom((prev) => Math.max(1, Math.min(maxZoom, prev * factor)))
 
-  // Frame indices to percentages of the clip. The lane used to draw two blocks sized
-  // by a ratio of counts, which put the gaps wherever the arithmetic landed rather
-  // than where they are — a picture that looks informative and is not.
-  const span = frameCount > 0 ? frameCount : 1
-  const percent = (frame: number): number => (frame / span) * 100
+  const waveform = media.waveform ?? []
+  const firstBar = Math.floor((from / clip) * waveform.length)
+  const lastBar = Math.ceil((to / clip) * waveform.length)
+  const bars = zoomed ? waveform.slice(firstBar, Math.max(firstBar + 1, lastBar)) : waveform
 
   return (
     <div
@@ -64,13 +182,57 @@ export function Timeline({
         className
       )}
     >
-      <div className="flex items-center justify-between px-3 py-1.5">
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Timeline
         </span>
-        <span className="text-[10px] text-muted-foreground tabular">
-          {formatTimecode(currentTime)} / {formatTimecode(duration)}
-        </span>
+
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label="Zoom timeline out"
+            disabled={!zoomed}
+            onClick={() => changeZoom(1 / ZOOM_STEP)}
+          >
+            <Minus className="size-3" />
+          </Button>
+          {/*
+            * Frames, not timecode, once zoomed.
+            *
+            * A window under a second reads as "0:09–0:09" in timecode — the same value
+            * twice, for a range that is the whole point of having zoomed. Frame numbers
+            * are also what the run reports its gaps in, so a window can be lined up
+            * against "frames 235–239" directly.
+            */}
+          <span className="w-24 text-center text-[10px] text-muted-foreground tabular">
+            {zoomed ? `frames ${Math.round(from * fps)}–${Math.round(to * fps)}` : "whole clip"}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label="Zoom timeline in"
+            disabled={zoom >= maxZoom - 0.001}
+            onClick={() => changeZoom(ZOOM_STEP)}
+          >
+            <Plus className="size-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label="Fit timeline to clip"
+            disabled={!zoomed}
+            onClick={() => setZoom(1)}
+          >
+            <Maximize className="size-3" />
+          </Button>
+          <span className="ml-1 text-[10px] text-muted-foreground tabular">
+            {formatTimecode(currentTime)} / {formatTimecode(duration)}
+          </span>
+        </div>
       </div>
 
       <div
@@ -87,23 +249,32 @@ export function Timeline({
         aria-valuenow={Math.round(currentTime)}
         tabIndex={0}
         onKeyDown={(event) => {
-          if (event.key === "ArrowLeft") onSeek(Math.max(0, currentTime - 1))
-          if (event.key === "ArrowRight") onSeek(Math.min(duration, currentTime + 1))
+          // A step of one window-width per keypress would skip the detail the zoom was
+          // for, so stepping follows the window: a second at fit, a frame or two in.
+          const nudge = Math.max(1 / 60, span / 20)
+          if (event.key === "ArrowLeft") onSeek(Math.max(0, currentTime - nudge))
+          if (event.key === "ArrowRight") onSeek(Math.min(duration, currentTime + nudge))
+          if (event.key === "+" || event.key === "=") changeZoom(ZOOM_STEP)
+          if (event.key === "-") changeZoom(1 / ZOOM_STEP)
+          if (event.key === "0") setZoom(1)
         }}
       >
-        {media.thumbnails.length > 0 ? (
-          <div className="flex h-14 w-full overflow-hidden border-y border-border">
-            {media.thumbnails.map((src, index) => (
+        {frames.length > 0 ? (
+          <div className="relative h-14 w-full overflow-hidden border-y border-border">
+            {frames.map((frame) => (
               // Plain img: these are local media:// URLs, which next/image cannot
               // optimise and should not try to.
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                key={src}
-                src={src}
+                key={frame.index}
+                src={frame.src}
                 alt=""
                 draggable={false}
-                className="h-full min-w-0 flex-1 object-cover"
-                style={{ opacity: index === 0 ? 1 : undefined }}
+                className="absolute inset-y-0 h-full object-cover"
+                style={{
+                  left: `${percent(frame.from)}%`,
+                  width: `${((frame.to - frame.from) / span) * 100}%`,
+                }}
               />
             ))}
           </div>
@@ -113,12 +284,18 @@ export function Timeline({
           </div>
         )}
 
-        {media.waveform && media.waveform.length > 0 && (
-          <div className="flex h-9 items-center gap-px overflow-hidden bg-background/60 px-px">
-            {media.waveform.map((amplitude, index) => (
+        {/*
+          * Bars are capped in width so a zoomed window reads as the sampled envelope it
+          * is. The waveform has a fixed number of buckets for the whole clip, and
+          * without a cap a half-second window stretches twenty of them into a wall of
+          * grey that looks like data it does not have.
+          */}
+        {bars.length > 0 && (
+          <div className="flex h-9 items-center justify-between gap-px overflow-hidden bg-background/60 px-px">
+            {bars.map((amplitude, index) => (
               <div
                 key={index}
-                className="min-w-0 flex-1 rounded-[1px] bg-muted-foreground/50"
+                className="min-w-0 max-w-[6px] flex-1 rounded-[1px] bg-muted-foreground/50"
                 style={{ height: `${Math.max(4, amplitude * 100)}%` }}
               />
             ))}
@@ -131,8 +308,8 @@ export function Timeline({
               <div
                 className="absolute inset-y-0 bg-track-corner"
                 style={{
-                  left: `${percent(result.trackedFrom)}%`,
-                  width: `${percent(result.trackedTo - result.trackedFrom + 1)}%`,
+                  left: `${percent(frameTime(result.trackedFrom))}%`,
+                  width: `${((frameTime(result.trackedTo + 1) - frameTime(result.trackedFrom)) / span) * 100}%`,
                 }}
                 title={`Tracked across frames ${result.trackedFrom}–${result.trackedTo}`}
               />
@@ -142,8 +319,8 @@ export function Timeline({
                 key={`${range.from}-${range.to}`}
                 className="absolute inset-y-0 bg-warning"
                 style={{
-                  left: `${percent(range.from)}%`,
-                  width: `${Math.max(0.4, percent(range.to - range.from + 1))}%`,
+                  left: `${percent(frameTime(range.from))}%`,
+                  width: `${Math.max(0.4, ((frameTime(range.to + 1) - frameTime(range.from)) / span) * 100)}%`,
                 }}
                 title={`Frames ${range.from}–${range.to} still carry the mark`}
               />
@@ -154,7 +331,7 @@ export function Timeline({
         <div
           aria-hidden
           className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-primary shadow-[0_0_6px_var(--primary)]"
-          style={{ left: `${playheadPercent}%` }}
+          style={{ left: `${percent(currentTime)}%` }}
         />
       </div>
 
@@ -176,6 +353,43 @@ export function Timeline({
       )}
     </div>
   )
+}
+
+/**
+ * The pictures to draw for the visible window, from whichever strip covers it.
+ *
+ * The dense strip is preferred but may lag a fast scrub by a moment, and it can be
+ * missing entirely — a clip FFmpeg cannot sample twice is still a clip. Falling back
+ * to the clip-wide strip stretches the pictures, which is worse than a dense strip and
+ * far better than an empty band where the filmstrip used to be.
+ */
+function visibleFrames(
+  dense: FilmstripWindow | null,
+  media: ClipMedia,
+  clip: number,
+  from: number,
+  to: number
+): StripFrame[] {
+  const source =
+    dense && dense.interval > 0 && dense.fromSeconds <= from + dense.interval && dense.toSeconds >= to - dense.interval
+      ? { thumbnails: dense.thumbnails, start: dense.fromSeconds, interval: dense.interval }
+      : {
+          thumbnails: media.thumbnails,
+          start: 0,
+          interval:
+            media.thumbnailInterval > 0
+              ? media.thumbnailInterval
+              : clip / Math.max(1, media.thumbnails.length),
+        }
+
+  const frames: StripFrame[] = []
+  for (const [index, src] of source.thumbnails.entries()) {
+    const start = source.start + index * source.interval
+    const end = start + source.interval
+    if (end <= from || start >= to) continue
+    frames.push({ index, src, from: start, to: end })
+  }
+  return frames
 }
 
 function Legend({ className, children }: { className: string; children: React.ReactNode }) {

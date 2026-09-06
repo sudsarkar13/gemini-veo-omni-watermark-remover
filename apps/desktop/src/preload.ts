@@ -8,6 +8,7 @@ import {
   EVENTS,
   type ClipMedia,
   type DesktopApi,
+  type FilmstripWindow,
   type Job,
   type JobOptions,
   type JobProgress,
@@ -36,6 +37,14 @@ const api: DesktopApi = {
   cancelJob: (id) => ipcRenderer.invoke(CHANNELS.jobsCancel, id) as Promise<void>,
   revealOutput: (id) => ipcRenderer.invoke(CHANNELS.jobsReveal, id) as Promise<void>,
   getMedia: (id) => ipcRenderer.invoke(CHANNELS.jobsMedia, id) as Promise<ClipMedia | null>,
+  getFilmstrip: (id, fromSeconds, toSeconds, count) =>
+    ipcRenderer.invoke(
+      CHANNELS.jobsFilmstrip,
+      id,
+      fromSeconds,
+      toSeconds,
+      count
+    ) as Promise<FilmstripWindow | null>,
   systemInfo: () => ipcRenderer.invoke(CHANNELS.systemInfo),
   getSettings: () => ipcRenderer.invoke(CHANNELS.settingsGet) as Promise<Settings>,
   setSettings: (partial) => ipcRenderer.invoke(CHANNELS.settingsSet, partial) as Promise<Settings>,

@@ -182,10 +182,16 @@ rectangle.
 - **Frames no track reached at all** are drawn distinctly from occluded ones. A frame
   the engine decided to leave is not the same as one it never considered, and only the
   second means the output still carries the mark.
-- **Zoom** (`+` / `−`, scroll-wheel, or a range control) expands the timeline so
-  individual frames can be reached on a long clip. The filmstrip resolves to more
-  thumbnails as it zooms; the playhead stays centred. Fit-to-clip is always one press
+- **Zoom** (`+` / `−` while the timeline is focused, scroll-wheel, or the buttons in the
+  timeline header) shows a window of the clip rather than the whole of it, so individual
+  frames can be reached on a long clip. The filmstrip genuinely resolves as it zooms —
+  the main process samples the visible window itself, down to one thumbnail per frame —
+  rather than stretching the clip-wide strip. The playhead stays centred, so the window
+  follows playback instead of jumping a screen at a time. Fit-to-clip is always one press
   away.
+- Once zoomed, the header names the window in **frames**, not timecode: a window under a
+  second reads as "0:09–0:09" in timecode, and frames are what a run reports its gaps in,
+  so "frames 227–239" lines up directly against "frames 235–239 still carry the mark".
 
 ### 5.6 Marking a watermark by hand
 
@@ -358,7 +364,8 @@ with an inline note explaining why the default is 1.
 | `Cmd/Ctrl+D` | Toggle Advanced drawer |
 | `Cmd/Ctrl+,` | Settings |
 | `Delete` | Remove selected job |
-| `0` / `1` | Zoom to fit / 100% |
+| `0` / `1` | Preview zoom to fit / 100% |
+| `+` / `−` | Zoom the timeline in / out (when the timeline has focus; `0` fits) |
 | `B` | Cycle compare mode |
 
 Every action must be reachable without the keyboard. Nothing is shortcut-only.

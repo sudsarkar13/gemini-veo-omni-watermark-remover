@@ -9,6 +9,7 @@ import { blend, scaleAlphaMap, syntheticDiamond, type Frame, type Rect } from "@
 import { decodeFrames } from "./decode.ts"
 import { encodeFrames } from "./encode.ts"
 import { resolveBinaries } from "./ffmpeg.ts"
+import { resolveWindow } from "./filmstrip.ts"
 import { parseManualMark } from "./cli.ts"
 import { parseRational, probe } from "./probe.ts"
 import { processVideo } from "./process.ts"
@@ -230,5 +231,47 @@ describe("parseManualMark", () => {
     assert.throws(() => parseManualMark("a,b,c,d@1-2"), /x,y,w,h/)
     assert.throws(() => parseManualMark("1,2,0,4@1-2"), /positive/)
     assert.throws(() => parseManualMark("1,2,3,4@5-1"), /backwards/)
+  })
+})
+
+describe("resolveWindow", () => {
+  const CLIP = 10
+  const FPS = 24
+
+  it("defaults to the whole clip", () => {
+    assert.deepEqual(resolveWindow(CLIP, FPS, {}), { start: 0, duration: 10 })
+  })
+
+  it("keeps a window that fits", () => {
+    assert.deepEqual(resolveWindow(CLIP, FPS, { startSeconds: 9, durationSeconds: 1 }), {
+      start: 9,
+      duration: 1,
+    })
+  })
+
+  it("trims a window that runs past the end rather than asking for frames that do not exist", () => {
+    assert.deepEqual(resolveWindow(CLIP, FPS, { startSeconds: 9.5, durationSeconds: 4 }), {
+      start: 9.5,
+      duration: 0.5,
+    })
+  })
+
+  it("clamps a start beyond the clip to its last frame", () => {
+    // Not an error: the timeline can ask for a window around a playhead sitting on the
+    // final frame, and an empty strip there would read as "no preview available".
+    const window = resolveWindow(CLIP, FPS, { startSeconds: 99, durationSeconds: 2 })
+    assert.ok(window.start > 9.9 && window.start < 10)
+    assert.equal(Math.round(window.duration * 1000), Math.round((1 / FPS) * 1000))
+  })
+
+  it("floors a sub-frame window at one frame", () => {
+    // Zero would divide by zero in the fps filter and come back as an empty strip.
+    const window = resolveWindow(CLIP, FPS, { startSeconds: 5, durationSeconds: 0 })
+    assert.equal(Math.round(window.duration * 1000), Math.round((1 / FPS) * 1000))
+  })
+
+  it("survives a clip whose frame rate was never established", () => {
+    const window = resolveWindow(CLIP, 0, { startSeconds: 5, durationSeconds: 0 })
+    assert.ok(window.duration > 0)
   })
 })

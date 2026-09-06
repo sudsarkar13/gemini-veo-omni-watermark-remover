@@ -14,10 +14,24 @@ import { probe, type VideoInfo } from "./probe.ts"
  */
 
 export interface FilmstripOptions {
-  /** How many thumbnails to produce across the whole clip. */
+  /** How many thumbnails to produce across the window. */
   readonly count?: number
   /** Thumbnail width in pixels; height follows the source aspect ratio. */
   readonly width?: number
+  /**
+   * Window into the clip, in seconds. Defaults to the whole thing.
+   *
+   * A zoomed timeline covers a second or two of video, and stretching the clip-wide
+   * strip across it shows the same twenty-eight pictures ten times larger — which
+   * tells the user nothing they could not already see. Sampling the window itself is
+   * what makes zooming worth doing.
+   */
+  readonly startSeconds?: number
+  readonly durationSeconds?: number
+  /** Filename prefix, so several windows can live in one directory. */
+  readonly prefix?: string
+  /** Whether to empty the directory first. Off when adding a window to an existing strip. */
+  readonly replace?: boolean
 }
 
 export interface Filmstrip {
@@ -28,6 +42,32 @@ export interface Filmstrip {
   readonly interval: number
   readonly width: number
   readonly height: number
+  /** The window actually sampled, which may be shorter than the one asked for. */
+  readonly startSeconds: number
+  readonly durationSeconds: number
+}
+
+/**
+ * The window actually sampled, given the one asked for.
+ *
+ * Separated out and exported because this is where a zoomed timeline can go wrong in
+ * ways nothing downstream would notice: a window past the end of the clip, or one
+ * shorter than a single frame, would otherwise reach FFmpeg as a zero or negative
+ * duration and come back as an empty strip — or as a division by zero in the fps
+ * filter. Both clamp to the last frame instead.
+ */
+export function resolveWindow(
+  clipDuration: number,
+  frameRate: number,
+  options: Pick<FilmstripOptions, "startSeconds" | "durationSeconds">
+): { start: number; duration: number } {
+  const frame = 1 / (frameRate > 0 ? frameRate : 30)
+  const start = Math.max(0, Math.min(options.startSeconds ?? 0, Math.max(0, clipDuration - frame)))
+  const duration = Math.max(
+    frame,
+    Math.min(options.durationSeconds ?? clipDuration - start, clipDuration - start)
+  )
+  return { start, duration }
 }
 
 export async function extractFilmstrip(
@@ -40,34 +80,48 @@ export async function extractFilmstrip(
   const count = Math.max(4, Math.min(options.count ?? 40, 200))
   const width = options.width ?? 160
   const height = Math.max(2, Math.round((width * meta.height) / meta.width))
+  const prefix = options.prefix ?? "thumb"
 
-  await rm(outputDirectory, { recursive: true, force: true })
+  if (options.replace ?? true) {
+    await rm(outputDirectory, { recursive: true, force: true })
+  }
   await mkdir(outputDirectory, { recursive: true })
 
-  const duration = meta.durationSeconds > 0 ? meta.durationSeconds : count / meta.frameRate
+  const clipDuration = meta.durationSeconds > 0 ? meta.durationSeconds : count / meta.frameRate
+  const { start, duration } = resolveWindow(clipDuration, meta.frameRate, options)
   const interval = duration / count
   const { ffmpeg } = await resolveBinaries()
 
-  // fps=1/interval samples evenly across the clip. -vsync vfr stops FFmpeg padding
+  // -ss before -i seeks by keyframe index rather than decoding up to the point, which
+  // is the difference between a window opening instantly and a long clip stalling the
+  // timeline every time it is zoomed.
+  //
+  // fps=1/interval samples evenly across the window. -vsync vfr stops FFmpeg padding
   // duplicates when the requested rate does not divide the source rate evenly.
   await run(ffmpeg, [
     "-v", "error",
     "-nostdin",
+    ...(start > 0 ? ["-ss", start.toFixed(3)] : []),
     "-i", input,
+    "-t", duration.toFixed(3),
     "-vf", `fps=${1 / interval},scale=${width}:${height}`,
     "-vsync", "vfr",
     "-frames:v", String(count),
     "-q:v", "4",
-    join(outputDirectory, "thumb_%04d.jpg"),
+    join(outputDirectory, `${prefix}_%04d.jpg`),
   ])
 
-  const names = (await readdir(outputDirectory)).filter((n) => n.endsWith(".jpg")).sort()
+  const names = (await readdir(outputDirectory))
+    .filter((name) => name.startsWith(`${prefix}_`) && name.endsWith(".jpg"))
+    .sort()
   return {
     directory: outputDirectory,
     frames: names.map((name) => join(outputDirectory, name)),
     interval,
     width,
     height,
+    startSeconds: start,
+    durationSeconds: duration,
   }
 }
 
