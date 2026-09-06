@@ -7,6 +7,7 @@ import {
   type Coverage,
   type Frame,
   type PlanOptions,
+  type RenderOptions,
 } from "@gvowr/engine"
 
 import { decodeFrames } from "./decode.ts"
@@ -22,7 +23,7 @@ import { probe, type VideoInfo } from "./probe.ts"
  * tool has to give up.
  */
 
-export interface ProcessOptions extends PlanOptions, EncodeOptions {
+export interface ProcessOptions extends PlanOptions, EncodeOptions, RenderOptions {
   readonly onAnalyseProgress?: (frame: number, total: number) => void
   readonly onRenderProgress?: (frame: number, total: number) => void
 }
@@ -34,6 +35,8 @@ export interface ProcessResult {
   readonly framesCorrected: number
   /** Frames a track covered but deliberately declined to correct, e.g. occlusion. */
   readonly framesLeftUntouched: number
+  /** Frames where pixels were synthesised rather than recovered. Never folded in. */
+  readonly framesFilled: number
   /**
    * Frames inside the tracked span that no track reached at all.
    *
@@ -66,13 +69,18 @@ export async function processVideo(
   // Pass 2: render. Decode again and apply the finished plan.
   let corrected = 0
   let untouched = 0
+  let filled = 0
   let rendered = 0
 
   async function* corrections(): AsyncGenerator<Frame, void, undefined> {
     for await (const frame of decodeFrames(input, info)) {
-      const report = renderFrame(frame, plan, rendered, template)
+      const report = renderFrame(frame, plan, rendered, template, {
+        ...(options.fill !== undefined ? { fill: options.fill } : {}),
+        ...(options.fillOptions ? { fillOptions: options.fillOptions } : {}),
+      })
       corrected += report.applied
       untouched += report.skipped
+      filled += report.filled
       rendered++
       options.onRenderProgress?.(rendered, info.frameCount)
       yield frame
@@ -90,6 +98,7 @@ export async function processVideo(
     framesWritten: encoded.framesWritten,
     framesCorrected: corrected,
     framesLeftUntouched: untouched,
+    framesFilled: filled,
     coverage: coverage(plan.tracks),
     audioCopied: encoded.audioCopied,
   }

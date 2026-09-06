@@ -346,6 +346,11 @@ export function Timeline({
           {result.framesUncovered > 0 && (
             <Legend className="bg-warning">Still marked {result.framesUncovered}</Legend>
           )}
+          {/* Never added into "corrected": those frames have the pixels that were
+              there, these have plausible ones. */}
+          {result.framesFilled > 0 && (
+            <Legend className="bg-track-roaming">Filled {result.framesFilled}</Legend>
+          )}
           <span className="ml-auto">
             {result.tracksFound} watermark{result.tracksFound === 1 ? "" : "s"} tracked
           </span>

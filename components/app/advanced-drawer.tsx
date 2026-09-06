@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 
 /**
@@ -33,6 +34,9 @@ export const DEFAULT_OPTIONS: JobOptions = {
   crf: 14,
   preset: "slow",
   encoder: "auto",
+  // Off. The analytical path is the product; this one invents pixels and is chosen
+  // per run by someone who has read what it does.
+  fill: false,
 }
 
 export function AdvancedDrawer({
@@ -133,6 +137,31 @@ export function AdvancedDrawer({
           </Field>
             </>
           )}
+
+          {/*
+            * The one control that makes the tool invent rather than recover, so it is
+            * worded as what it does and sits apart from the settings that tune the
+            * exact path. Off by default, and it stays off between runs.
+            */}
+          <div className="col-span-2 flex items-start gap-2 rounded-md border border-border bg-background/40 p-2">
+            <Switch
+              id="fill-toggle"
+              checked={options.fill === true}
+              onCheckedChange={(checked) => set("fill", checked === true)}
+              disabled={disabled}
+            />
+            <div className="flex flex-col gap-0.5">
+              <Label htmlFor="fill-toggle" className="text-[12px] font-medium">
+                Fill what cannot be removed
+              </Label>
+              <span className="text-[10px] leading-relaxed text-muted-foreground">
+                For regions the exact maths refused — usually a box you drew that did not
+                invert. Pixels are <strong>synthesised from the surroundings, not
+                recovered</strong>, and are counted separately in the result. Everything
+                that inverts cleanly is unaffected.
+              </span>
+            </div>
+          </div>
 
           <div className="col-span-2 flex justify-end">
             <Button

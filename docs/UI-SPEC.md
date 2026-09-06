@@ -144,7 +144,7 @@ Every control the application ships. Nothing outside this list gets built.
 | --- | --- | --- |
 | Add files | Button + drop target | Native file picker, multi-select. Accepts video `.mp4 .mov .mkv .webm` and stills `.png .jpg .jpeg .webp` — see §5.7. |
 | Job row | List item | Thumbnail, filename (truncated middle, full path on hover), resolution, duration, status. |
-| Row status | Icon + label | `queued` · `analysing` · `processing %` · `done` · `skipped frames` · `failed`. |
+| Row status | Icon + label | `queued` · `analysing` · `processing %` · `done` · `skipped frames` · `regions filled` · `no watermark found` · `failed`. `regions filled` is its own state, not a variant of done: part of that output was synthesised, and the queue is where someone scans for the runs that need looking at. |
 | Row context menu | Right-click | Reveal in Finder/Explorer · Remove from queue · Retry · Copy diagnostics. |
 | Reorder | Drag | Reorder pending jobs. Running and finished jobs are not draggable. |
 | Clear finished | Button | Removes completed rows. Never removes queued or running. |

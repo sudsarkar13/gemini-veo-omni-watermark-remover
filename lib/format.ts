@@ -65,6 +65,7 @@ export const STATE_APPEARANCE: Record<JobState, StateAppearance> = {
   // Deliberately distinct from "Done". Rolling this up as plain success would hide
   // exactly the frames the user most needs to look at.
   "done-with-skips": { label: "Done, some frames skipped", tone: "warning" },
+  "done-with-fill": { label: "Done, some regions filled", tone: "warning" },
   "no-mark-found": { label: "No watermark found", tone: "muted" },
   failed: { label: "Failed", tone: "danger" },
   cancelled: { label: "Cancelled", tone: "muted" },

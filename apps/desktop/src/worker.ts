@@ -38,6 +38,7 @@ export interface WorkerResult {
   readonly tracksRejected: number
   readonly framesCorrected: number
   readonly framesLeftUntouched: number
+  readonly framesFilled: number
   readonly framesUncovered: number
   readonly uncoveredRanges: readonly { readonly from: number; readonly to: number }[]
   readonly trackedFrom: number
@@ -83,6 +84,7 @@ process.on("message", (message: StartMessage) => {
       if (message.kind === "image") {
         const image = await processImage(message.input, message.output, template, {
           ...(message.options.mode ? { mode: message.options.mode } : {}),
+          ...(message.options.fill ? { fill: true } : {}),
           ...manualMarksFor(message.options),
         })
 
@@ -95,6 +97,7 @@ process.on("message", (message: StartMessage) => {
             tracksRejected: image.plan.diagnostics.tracksRejected,
             framesCorrected: image.applied,
             framesLeftUntouched: image.skipped,
+            framesFilled: image.filled,
             // A still has no timeline, so it has no gaps in one. Saying "0 frames
             // uncovered" here is a fact, not a reassurance: `written` is what carries
             // the bad news.
@@ -111,6 +114,7 @@ process.on("message", (message: StartMessage) => {
 
       const result = await processVideo(message.input, message.output, template, {
         ...(message.options.mode ? { mode: message.options.mode } : {}),
+        ...(message.options.fill ? { fill: true } : {}),
         ...(message.options.sweepInterval ? { sweepInterval: message.options.sweepInterval } : {}),
         ...(message.options.crf !== undefined ? { crf: message.options.crf } : {}),
         ...(message.options.preset ? { preset: message.options.preset } : {}),
@@ -133,6 +137,7 @@ process.on("message", (message: StartMessage) => {
           tracksRejected: result.plan.diagnostics.tracksRejected,
           framesCorrected: result.framesCorrected,
           framesLeftUntouched: result.framesLeftUntouched,
+          framesFilled: result.framesFilled,
           framesUncovered: result.coverage.framesUncovered,
           uncoveredRanges: result.coverage.gaps,
           trackedFrom: result.coverage.firstFrame,

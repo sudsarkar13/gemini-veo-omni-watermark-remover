@@ -256,12 +256,17 @@ export class JobQueue {
       // we lost — and calling a clip that still carries the mark "done" is the exact
       // dishonesty this state exists to prevent.
       const incomplete = result.framesLeftUntouched > 0 || result.framesUncovered > 0
+      // Ordered by how much the user needs to look at it. Frames that still carry the
+      // mark outrank invented pixels, and both outrank a plain success — a run that
+      // ends up in one of these states is one somebody should inspect.
       const state: JobState =
-        !result.written || result.tracksFound === 0
+        !result.written || (result.tracksFound === 0 && result.framesFilled === 0)
           ? "no-mark-found"
           : incomplete
             ? "done-with-skips"
-            : "done"
+            : result.framesFilled > 0
+              ? "done-with-fill"
+              : "done"
 
       // Nothing written means there is nothing to point the media protocol at, and
       // nothing to reveal in the file manager. Registering the path anyway would give
@@ -307,6 +312,7 @@ export function isFinished(state: JobState): boolean {
   return (
     state === "done" ||
     state === "done-with-skips" ||
+    state === "done-with-fill" ||
     state === "no-mark-found" ||
     state === "failed" ||
     state === "cancelled"

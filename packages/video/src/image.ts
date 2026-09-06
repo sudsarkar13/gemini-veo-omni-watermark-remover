@@ -10,6 +10,7 @@ import {
   type Frame,
   type PlanOptions,
   type Rect,
+  type RenderOptions,
 } from "@gvowr/engine"
 
 import { resolveBinaries, run, spawnStreaming } from "./ffmpeg.ts"
@@ -289,7 +290,7 @@ export async function encodeImage(
   }
 }
 
-export interface ProcessImageOptions extends PlanOptions, EncodeImageOptions {}
+export interface ProcessImageOptions extends PlanOptions, EncodeImageOptions, RenderOptions {}
 
 export interface ImageRegion {
   readonly rect: Rect
@@ -305,6 +306,13 @@ export interface ProcessImageResult {
   readonly applied: number
   /** Regions found but declined, e.g. judged occluded. */
   readonly skipped: number
+  /**
+   * Regions synthesised rather than recovered, when the fill was asked for.
+   *
+   * Counted apart from `applied` wherever it goes: a corrected region is the pixels
+   * that were there, a filled one is a plausible guess.
+   */
+  readonly filled: number
   /** False means the original was left alone and nothing was written. */
   readonly written: boolean
   /** Why nothing was written, in a form the UI can turn into a sentence. */
@@ -352,17 +360,25 @@ export async function processImage(
     if (entry) regions.push({ rect: entry.rect, alpha: entry.alpha, confidence: entry.confidence })
   }
 
-  const report = renderFrame(frame, plan, 0, template)
+  const report = renderFrame(frame, plan, 0, template, {
+    ...(options.fill !== undefined ? { fill: options.fill } : {}),
+    ...(options.fillOptions ? { fillOptions: options.fillOptions } : {}),
+  })
 
-  if (report.applied === 0) {
+  // A filled region is a change to the image, so there is something to write — but it
+  // is never counted as a correction, and the caller is told which it got.
+  if (report.applied === 0 && report.filled === 0) {
     return {
       info,
       plan,
       regions,
       applied: 0,
       skipped: report.skipped,
+      filled: 0,
       written: false,
-      reason: report.skipped > 0 ? "not-invertible" : "no-mark-found",
+      // A region the user drew and the verifier refused is a different answer from
+      // "nothing here": it is the case the fill exists for.
+      reason: report.skipped > 0 || plan.refusals.length > 0 ? "not-invertible" : "no-mark-found",
     }
   }
 
@@ -374,6 +390,7 @@ export async function processImage(
     regions,
     applied: report.applied,
     skipped: report.skipped,
+    filled: report.filled,
     written: true,
     reason: null,
   }

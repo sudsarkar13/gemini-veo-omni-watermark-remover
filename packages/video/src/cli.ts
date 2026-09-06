@@ -32,6 +32,9 @@ Options:
                           Repeatable. Seeds the search where you say the mark is;
                           tracking follows it from there.
   --sweep-interval <n>    Frames between full-frame sweeps (15)
+  --fill                  Synthesise pixels for regions the exact path declined.
+                          Off by default. Invents rather than recovers, so what it
+                          touches is reported as "filled", never as corrected.
   --crf <n>               Quality, lower is better (14)
   --preset <name>         x264 preset (slow)
   --encoder <auto|software|hardware>
@@ -48,6 +51,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       mode: { type: "string" },
       manual: { type: "string", multiple: true },
       "sweep-interval": { type: "string" },
+      fill: { type: "boolean", default: false },
       crf: { type: "string" },
       preset: { type: "string" },
       encoder: { type: "string" },
@@ -90,6 +94,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
     const result = await processVideo(resolve(input), resolve(output), template, {
       mode: parseMode(values.mode),
+      ...(values.fill ? { fill: true } : {}),
       ...(values.manual ? { manualMarks: values.manual.map(parseManualMark) } : {}),
       ...(values["sweep-interval"] ? { sweepInterval: Number(values["sweep-interval"]) } : {}),
       ...(values.crf ? { crf: Number(values.crf) } : {}),
@@ -117,6 +122,7 @@ export async function main(argv: readonly string[]): Promise<number> {
             framesWritten: result.framesWritten,
             framesCorrected: result.framesCorrected,
             framesLeftUntouched: result.framesLeftUntouched,
+            framesFilled: result.framesFilled,
             coverage: result.coverage,
             audioCopied: result.audioCopied,
           },
@@ -133,6 +139,9 @@ export async function main(argv: readonly string[]): Promise<number> {
         `  resolution calibrated: ${d.calibratedResolution ? "yes" : "no (using a generic prior)"}\n` +
         `  tracks kept ${result.plan.tracks.length}, rejected ${d.tracksRejected}\n` +
         `  corrections applied ${result.framesCorrected}\n` +
+        (result.framesFilled > 0
+          ? `  regions FILLED (synthesised, not recovered) ${result.framesFilled}\n`
+          : "") +
         `  audio: ${result.audioCopied ? "copied unchanged" : "none"}\n`
     )
     if (result.framesLeftUntouched > 0) {
@@ -163,6 +172,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     const template = await loadTemplate(values.template, values.size)
     const result = await processImage(resolve(input), resolve(output), template, {
       mode: parseMode(values.mode),
+      ...(values.fill ? { fill: true } : {}),
       ...(values.manual ? { manualMarks: values.manual.map(parseManualMark) } : {}),
     })
 
@@ -177,6 +187,7 @@ export async function main(argv: readonly string[]): Promise<number> {
             regions: result.regions,
             applied: result.applied,
             skipped: result.skipped,
+            filled: result.filled,
             written: result.written,
             reason: result.reason,
           },
@@ -210,6 +221,14 @@ export async function main(argv: readonly string[]): Promise<number> {
       process.stdout.write(
         `  removed ${region.rect.width}px mark at ${region.rect.x},${region.rect.y} ` +
           `(alpha ${region.alpha.toFixed(2)}, score ${region.confidence.toFixed(2)})\n`
+      )
+    }
+    if (result.filled > 0) {
+      // Named as invention every time it is mentioned. This is the one part of the
+      // output the tool cannot vouch for.
+      process.stdout.write(
+        `  FILLED ${result.filled} region(s) — pixels synthesised from the surroundings, ` +
+          `not recovered\n`
       )
     }
     process.stdout.write(`  written to ${output}\n`)

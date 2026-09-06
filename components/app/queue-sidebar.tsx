@@ -28,7 +28,9 @@ export function QueueSidebar({
   onClearFinished: () => void
 }) {
   const finished = jobs.filter((job) =>
-    ["done", "done-with-skips", "no-mark-found", "failed", "cancelled"].includes(job.state)
+    ["done", "done-with-skips", "done-with-fill", "no-mark-found", "failed", "cancelled"].includes(
+      job.state
+    )
   ).length
 
   return (

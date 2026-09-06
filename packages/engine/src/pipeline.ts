@@ -1,4 +1,5 @@
 import { scaleAlphaMap } from "./alpha-map.ts"
+import { inpaint, type InpaintOptions } from "./inpaint.ts"
 import { ALPHA_THRESHOLD, LOGO_VALUE, MAX_ALPHA } from "./constants.ts"
 import { unblend } from "./blend.ts"
 import { toGrayscale, type Grayscale } from "./correlate.ts"
@@ -92,8 +93,23 @@ export interface ClipDiagnostics {
   readonly frames: FrameReport[]
 }
 
+/**
+ * A region the user pointed at that the verifier would not accept.
+ *
+ * Kept because it is the one place where "we found nothing" and "there is nothing
+ * there" are known to differ: somebody looked at the frame and said the mark is here,
+ * and no intensity put it back in line with its surroundings. Nothing is done with
+ * these unless the fill is switched on — see `PLAN.md` §2.1 — but they are the only
+ * honest place for it to run.
+ */
+export interface RefusedRegion {
+  readonly frame: number
+  readonly rect: Rect
+}
+
 export interface ClipPlan {
   readonly tracks: WatermarkTrack[]
+  readonly refusals: readonly RefusedRegion[]
   readonly diagnostics: ClipDiagnostics
 }
 
@@ -161,6 +177,7 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
   const started = Date.now()
   const perFrame: Observation[][] = []
   const reports: FrameReport[] = []
+  const refusals: RefusedRegion[] = []
 
   let width = 0
   let height = 0
@@ -267,7 +284,12 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
 
       // The verifier is the gate, not the detector. Correlation cannot tell a mark
       // from a highlight; reversibility can.
-      if (!best.verdict.isComposite) continue
+      if (!best.verdict.isComposite) {
+        // A drawn region that failed is worth remembering; a correlation peak that
+        // failed is just the verifier doing its job.
+        if (asserted.has(candidate)) refusals.push({ frame: index, rect: best.rect })
+        continue
+      }
       observations.push({
         rect: best.rect,
         alpha: best.verdict.gain,
@@ -334,6 +356,16 @@ export function createPlanner(map: AlphaMap, options: PlanOptions = {}): ClipPla
 
     return {
       tracks,
+      // Only the ones that stayed refused. A mark drawn on twenty frames that verified
+      // on eighteen of them should not offer to invent pixels on the other two — the
+      // track covers those, and interpolation is a better answer than synthesis.
+      refusals: refusals.filter(
+        (refusal) =>
+          !tracks.some((track) => {
+            const entry = track.frames.get(refusal.frame)
+            return entry !== undefined && overlap(entry.rect, refusal.rect) > 0.3
+          })
+      ),
       diagnostics: {
         width,
         height,
@@ -595,6 +627,26 @@ function collectCandidates(
 export interface RenderReport {
   readonly applied: number
   readonly skipped: number
+  /**
+   * Regions synthesised rather than recovered, when the fill was switched on.
+   *
+   * Counted apart from `applied` everywhere it travels, because it is a different
+   * claim: a corrected region is the pixels that were there, a filled one is a guess
+   * that looks plausible. See `PLAN.md` §2.1.
+   */
+  readonly filled: number
+}
+
+export interface RenderOptions {
+  /**
+   * Synthesise pixels for regions the exact path declined.
+   *
+   * Off unless asked for. It never touches a region that inverted cleanly, and never
+   * one where nothing was found — an unfound mark has no rectangle, and filling a
+   * guess would be damage rather than removal.
+   */
+  readonly fill?: boolean
+  readonly fillOptions?: InpaintOptions
 }
 
 /**
@@ -675,15 +727,27 @@ export function renderFrame(
   frame: Frame,
   plan: ClipPlan,
   frameIndex: number,
-  map: AlphaMap
+  map: AlphaMap,
+  options: RenderOptions = {}
 ): RenderReport {
   let applied = 0
   let skipped = 0
+  let filled = 0
 
   for (const track of plan.tracks) {
     const entry = track.frames.get(frameIndex)
     if (!entry) continue
     if (entry.state === "occluded") {
+      // The correction was declined here. Left alone by default and reported as such;
+      // filled only if the user asked for that, and still counted apart from the
+      // regions that were actually recovered.
+      if (options.fill) {
+        const report = inpaint(frame, map, entry.rect, options.fillOptions ?? {})
+        if (report.filled > 0) {
+          filled++
+          continue
+        }
+      }
       skipped++
       continue
     }
@@ -692,5 +756,13 @@ export function renderFrame(
     applied++
   }
 
-  return { applied, skipped }
+  if (options.fill) {
+    for (const refusal of plan.refusals) {
+      if (refusal.frame !== frameIndex) continue
+      const report = inpaint(frame, map, refusal.rect, options.fillOptions ?? {})
+      if (report.filled > 0) filled++
+    }
+  }
+
+  return { applied, skipped, filled }
 }

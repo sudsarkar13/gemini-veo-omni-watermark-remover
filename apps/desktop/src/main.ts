@@ -253,7 +253,12 @@ async function createWindow(): Promise<void> {
     if (seed && process.env["GVOWR_SMOKE_RUN"] === "1") {
       const [job] = queue.list()
       if (job) {
-        queue.start(job.id)
+        // Options as JSON, so a check can exercise a path the default run never takes
+        // — a hand-drawn region, or the fill.
+        let smokeOptions: JobOptions = {}
+        const raw = process.env["GVOWR_SMOKE_OPTIONS"]
+        if (raw) smokeOptions = JSON.parse(raw) as JobOptions
+        queue.start(job.id, smokeOptions)
         const deadline = Date.now() + 180_000
         let final = queue.list()[0]
         while (Date.now() < deadline) {
@@ -263,6 +268,7 @@ async function createWindow(): Promise<void> {
         }
         process.stdout.write(
           `SMOKE run state=${final?.state ?? "gone"} ` +
+            `filled=${final?.result?.framesFilled ?? "n/a"} ` +
             `written=${final?.result?.written ?? "n/a"} ` +
             `reason=${final?.result?.reason ?? "none"} ` +
             `corrected=${final?.result?.framesCorrected ?? "n/a"} ` +

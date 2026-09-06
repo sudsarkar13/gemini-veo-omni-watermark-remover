@@ -17,6 +17,15 @@ export type JobState =
   | "done"
   /** Succeeded, but some frames were deliberately left untouched. Not a silent pass. */
   | "done-with-skips"
+  /**
+   * Succeeded, and part of the output was synthesised rather than recovered.
+   *
+   * Its own state rather than "done", because the two are different promises and the
+   * queue is where someone scans for which runs need looking at. Not folded into
+   * `done-with-skips` either: a skipped frame kept its watermark, a filled one has
+   * invented pixels, and calling those the same thing helps nobody.
+   */
+  | "done-with-fill"
   /** Completed with no watermark found. Informational, not an error. */
   | "no-mark-found"
   | "failed"
@@ -102,6 +111,13 @@ export interface JobResult {
   /** Frames a track covered but deliberately declined to correct, e.g. occlusion. */
   readonly framesLeftUntouched: number
   /**
+   * Frames where pixels were synthesised rather than recovered.
+   *
+   * Never added into `framesCorrected`. A corrected frame has the pixels that were
+   * there; a filled one has a plausible guess, and the UI must keep saying so.
+   */
+  readonly framesFilled: number
+  /**
    * Frames inside the tracked span that no track reached, so nothing was applied and
    * the mark is still on them. The one number that means the output is not clean.
    */
@@ -180,6 +196,14 @@ export interface JobOptions {
    * still measures the alpha by reversibility before removing anything.
    */
   readonly manualMarks?: readonly ManualMarkInput[]
+  /**
+   * Synthesise pixels for regions the exact path declined.
+   *
+   * Off unless the user turns it on for this run. See `PLAN.md` §2.1 and
+   * `UI-SPEC.md` §5.8: it invents rather than recovers, so it is opt-in, it runs only
+   * where the maths refused, and what it touches is counted apart from the rest.
+   */
+  readonly fill?: boolean
 }
 
 export interface ManualMarkInput {

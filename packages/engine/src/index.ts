@@ -77,7 +77,10 @@ export {
   type DetectionMode,
   type FrameReport,
   type PlanOptions,
+  type RefusedRegion,
+  type RenderOptions,
   type RenderReport,
 } from "./pipeline.ts"
 export { decodePpm, encodePpm } from "./ppm.ts"
 export { defaultTemplate, loadTemplatePpm, syntheticDiamond, veoDiamond48 } from "./templates.ts"
+export { inpaint, type InpaintOptions, type InpaintReport } from "./inpaint.ts"

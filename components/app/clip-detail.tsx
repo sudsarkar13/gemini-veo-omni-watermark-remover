@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertTriangle, FolderOpen, Play, SearchX, Square } from "lucide-react"
+import { AlertTriangle, Brush, FolderOpen, Play, SearchX, Square } from "lucide-react"
 import { useState } from "react"
 import type { Job, JobOptions, ManualMarkInput } from "@gvowr/ipc"
 
@@ -66,7 +66,7 @@ export function ClipDetail({
   )
 
   const busy = job.state === "analysing" || job.state === "processing"
-  const rerunnable = ["done", "done-with-skips", "no-mark-found", "failed", "cancelled"].includes(
+  const rerunnable = ["done", "done-with-skips", "done-with-fill", "no-mark-found", "failed", "cancelled"].includes(
     job.state
   )
 
@@ -254,6 +254,30 @@ export function ClipDetail({
                     adjust the mark size to match what you see.
                   </>
                 )}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/*
+            * Filled regions get their own card, always, and the word is "filled".
+            * They are the one part of the output the tool cannot vouch for, and the
+            * user needs to be able to find them.
+            */}
+          {job.result && job.result.framesFilled > 0 && (
+            <Alert className="border-warning/40 bg-warning/5 text-foreground">
+              <Brush className="size-4 text-warning" />
+              <AlertTitle className="text-warning">
+                {job.result.framesFilled}{" "}
+                {still
+                  ? `region${job.result.framesFilled === 1 ? "" : "s"} filled`
+                  : `frame${job.result.framesFilled === 1 ? "" : "s"} filled`}{" "}
+                — those pixels were invented
+              </AlertTitle>
+              <AlertDescription className="text-muted-foreground">
+                The exact maths refused {still ? "that region" : "those regions"}, so with
+                Fill switched on the engine synthesised pixels from the surrounding image.
+                They are plausible, not recovered — check them before you rely on this
+                output. Everything else here was inverted exactly.
               </AlertDescription>
             </Alert>
           )}

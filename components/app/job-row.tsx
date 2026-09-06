@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  Brush,
   Check,
   CircleSlash,
   Film,
@@ -30,6 +31,7 @@ const ICONS = {
   processing: Loader2,
   done: Check,
   "done-with-skips": AlertTriangle,
+  "done-with-fill": Brush,
   "no-mark-found": SearchX,
   failed: XCircle,
   cancelled: CircleSlash,
