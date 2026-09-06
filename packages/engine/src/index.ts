@@ -85,3 +85,13 @@ export {
 export { decodePpm, encodePpm } from "./ppm.ts"
 export { defaultTemplate, loadTemplatePpm, syntheticDiamond, veoDiamond48 } from "./templates.ts"
 export { inpaint, type InpaintOptions, type InpaintReport } from "./inpaint.ts"
+export {
+  DEFAULT_RESIDUAL_SWEEP_INTERVAL,
+  checkResidual,
+  createResidualChecker,
+  type ResidualChecker,
+  type ResidualKind,
+  type ResidualOptions,
+  type ResidualRange,
+  type ResidualReport,
+} from "./residual.ts"

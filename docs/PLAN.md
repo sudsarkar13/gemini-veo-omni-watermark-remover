@@ -321,8 +321,15 @@ separate questions, each with its own cost:
 Sampling is sound for the second question because a mark that is present is present for
 many consecutive frames — the case Pass 4 exists to catch is a whole shot the tracker
 never covered, not a single stray frame. A leftover found at a sampled frame is then
-walked outward frame by frame to find its true extent, so the reported range is exact
-even though the search was not.
+**followed forward** on every subsequent frame by local re-score, so its end is exact
+even though the search that found it was not.
+
+Its *start* is not, and the report says so rather than rounding. Frames before the
+sample are already decoded and gone, so a range begins at the first frame **confirmed**
+to show the mark, which may be up to one sweep interval after it appeared. The interval
+travels with the report so that number can be stated instead of guessed at. Widening
+the range backward to the previous sample would present an assumption as a measurement,
+which is the one thing this pass exists to stop the rest of the app doing.
 
 Two further details matter:
 
