@@ -705,6 +705,12 @@ peer conflicts rather than caution. Re-check both when `eslint-config-next` upda
   finished picture. A clip can report 231 corrected and still carry a visible mark on a
   shot the tracker never covered. Pass 4 is the fix and is scheduled as Phase 4c.
 
+- **The corner mark is under-corrected on some frames.** Found by Pass 4 on the
+  calibration clip: frames 80–82 keep an alpha of 0.62, about half the mark, on a run
+  that reported no skips and no uncovered frames. The residual pass now says so; the
+  correction itself is not fixed. This is the first thing to look at, because it is a
+  defect in the exact path rather than a gap around it.
+
 - **A 4K still takes 13 s**, nearly all of it the full-resolution sweep across candidate
   sizes. A coarse pass at reduced resolution followed by a full-resolution refinement is
   the obvious fix and is not built.
@@ -801,6 +807,39 @@ separating what we left behind from what was always there. On the calibration cl
 
 The mark's site ends up quieter than ordinary content, and the controls are unchanged
 to one decimal place — nothing outside the mark was touched.
+
+### What Pass 4 found the first time it ran
+
+The check was built as a measuring stick and immediately earned its place: on the
+calibration clip the app reported `done`, **300 corrections, 0 frames uncovered**, no
+skips and no failures — an entirely honest account of what the plan decided — over a
+render that still carries the mark on **11 frames**.
+
+Measured against the ring, in 8-bit levels, on the encoded output:
+
+| Frames | Where | Source | Cleaned | Verdict |
+| --- | --- | --- | --- | --- |
+| 80–82 | corner mark, 48 px | 69.0 | **31.8** | roughly half the mark is still there |
+| 196–198 | roaming mark, 34 px | 64.6 | 4.7 | faint trace |
+| 199–200 | roaming, 34 px | 32.8 | 8.1 | faint trace |
+| 202–204 | roaming, 34 px | 93.5 | 7.8 | faint trace |
+| **150 (control)** | corner mark site | 49.8 | **−1.1** | correct, and not flagged |
+
+Every flagged range is a genuine residue and the one properly-corrected frame sampled
+as a control came back below the background and was **not** flagged — so on this clip
+the check has no false positives and the findings are real.
+
+Two separate faults, which is why the residual carries its measured alpha as well as
+its position:
+
+- **The corner mark at frames 80–82 is badly under-corrected** (alpha 0.62 left
+  behind). This is a real engine defect, not a reporting one, and it is not yet fixed.
+- **The roaming mark leaves 5–8 levels** across frames 196–204 (alpha 0.07–0.12) as it
+  drifts down the frame. Subtle, but consistently positive and consistently in the
+  mark's shape, so it is a residue rather than noise.
+
+Neither was visible to any number the app produced before this pass existed. That is
+the argument for Pass 4 in one paragraph.
 
 **Per-frame alpha was left alone deliberately.** The estimate is 1.002 on
 well-conditioned frames and wanders 0.75–1.22 on busy ones, which looks like a case
