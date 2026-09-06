@@ -237,7 +237,7 @@ absent rather than disabled:
 | Track timeline | Absent. It is a picture of time. |
 | Mark mode | Unchanged, minus the frame range: a region drawn on a still applies to the still. |
 | Advanced drawer | Detection mode, alpha, mark variant and manual region apply. Video-only rows — sweep interval, denoise, codec, CRF, encoder — are hidden. |
-| Pre-flight estimate | A line rather than a card. A still is about half a second. |
+| Pre-flight estimate | A line rather than a card. Measured: about 3 s at 1280×720, 13 s at 4K — nearly all of it the full-frame sweep. |
 | Header metadata | `1920×1080 · PNG · 2.4 MB · alpha` in place of the clip's codec and duration line. |
 
 **Detection runs as a full-frame sweep by default**, because on one frame it costs
@@ -249,6 +249,11 @@ reversibility is the only evidence there is.
 producing with those frames reported; an image with one bad frame is a bad image. The UI
 says the mark was not found, or was found and could not be inverted, and leaves the
 original alone.
+
+**A format this build of FFmpeg cannot write is refused before the run starts**, naming
+the missing encoder, rather than after the work is done. The format is never quietly
+substituted: handing back a PNG named `.webp` would be a liberty taken with someone's
+file.
 
 **The output format follows the input**, and the UI is explicit about what that costs.
 PNG and WebP are written losslessly and every untouched pixel survives exactly. A JPEG

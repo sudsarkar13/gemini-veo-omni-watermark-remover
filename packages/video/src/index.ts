@@ -10,3 +10,18 @@ export {
   type Filmstrip,
   type FilmstripOptions,
 } from "./filmstrip.ts"
+export {
+  canWrite,
+  decodeImage,
+  encodeImage,
+  imageFormatFor,
+  probeImage,
+  processImage,
+  IMAGE_EXTENSIONS,
+  type EncodeImageOptions,
+  type ImageFormat,
+  type ImageInfo,
+  type ImageRegion,
+  type ProcessImageOptions,
+  type ProcessImageResult,
+} from "./image.ts"

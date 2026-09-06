@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { existsSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -10,6 +11,14 @@ import { decodeFrames } from "./decode.ts"
 import { encodeFrames } from "./encode.ts"
 import { resolveBinaries } from "./ffmpeg.ts"
 import { resolveWindow } from "./filmstrip.ts"
+import {
+  decodeImage,
+  encodeImage,
+  imageFormatFor,
+  probeImage,
+  processImage,
+  type ImageInfo,
+} from "./image.ts"
 import { parseManualMark } from "./cli.ts"
 import { parseRational, probe } from "./probe.ts"
 import { processVideo } from "./process.ts"
@@ -273,5 +282,183 @@ describe("resolveWindow", () => {
   it("survives a clip whose frame rate was never established", () => {
     const window = resolveWindow(CLIP, 0, { startSeconds: 5, durationSeconds: 0 })
     assert.ok(window.duration > 0)
+  })
+})
+
+/**
+ * Still images through the same engine.
+ *
+ * These write and read real files with the real binaries, because everything that can
+ * go wrong here is at that boundary: a pixel format silently dropped, an alpha channel
+ * quietly discarded, a codec that this build of FFmpeg does not have.
+ */
+describe("images", () => {
+  const IMAGE_WIDTH = 320
+  const IMAGE_HEIGHT = 200
+  const IMAGE_MARK: Rect = { x: 200, y: 100, width: 40, height: 40 }
+  /**
+   * Full strength, as a real mark is.
+   *
+   * At 0.85 this fixture scores 0.58 against the template and falls just under the
+   * discovery bar — which is correct behaviour, not a bug: a single frame has no
+   * neighbours to corroborate it, so a weak correlation peak is exactly what the bar
+   * exists to refuse. The real Veo mark measures alpha 1.00, so the fixture does too.
+   */
+  const IMAGE_GAIN = 1
+
+  function picture(alpha: number | null): Frame {
+    const channels = alpha === null ? 3 : 4
+    const data = new Uint8ClampedArray(IMAGE_WIDTH * IMAGE_HEIGHT * channels)
+    let state = 0x9e3779b1
+    for (let i = 0; i < IMAGE_WIDTH * IMAGE_HEIGHT; i++) {
+      state = (state * 1664525 + 1013904223) >>> 0
+      const base = 70 + Math.round(50 * ((i % IMAGE_WIDTH) / IMAGE_WIDTH)) + ((state >>> 26) & 0x1f)
+      const o = i * channels
+      data[o] = base
+      data[o + 1] = base
+      data[o + 2] = base
+      if (alpha !== null) data[o + 3] = alpha
+    }
+    return { width: IMAGE_WIDTH, height: IMAGE_HEIGHT, channels: channels as 3 | 4, data }
+  }
+
+  function stamped(alpha: number | null): Frame {
+    const frame = picture(alpha)
+    blend(frame, scaleAlphaMap(syntheticDiamond(40), 40, 40), IMAGE_MARK, { gain: IMAGE_GAIN })
+    return frame
+  }
+
+  function infoFor(frame: Frame): ImageInfo {
+    return {
+      width: frame.width,
+      height: frame.height,
+      codec: "png",
+      pixelFormat: frame.channels === 4 ? "rgba" : "rgb24",
+      format: "png",
+      hasAlpha: frame.channels === 4,
+      sizeBytes: 0,
+      lossyRoundTrip: false,
+    }
+  }
+
+  it("removes a mark from a still and leaves every other pixel alone", async (t) => {
+    if (!ffmpegAvailable) return t.skip("ffmpeg not available")
+    const dir = await mkdtemp(join(tmpdir(), "gvowr-image-"))
+    const input = join(dir, "marked.png")
+    const output = join(dir, "clean.png")
+
+    const source = stamped(null)
+    await encodeImage(source, input, infoFor(source))
+    const before = await decodeImage(input)
+
+    const result = await processImage(input, output, syntheticDiamond(40))
+    assert.equal(result.written, true, `nothing was written: ${result.reason}`)
+    assert.equal(result.applied, 1)
+
+    const after = await decodeImage(output)
+    const original = picture(null)
+
+    // Inside the mark: back towards what was underneath it. Measured as mean absolute
+    // error against the truth, the same way the video end-to-end test measures it —
+    // a worst-pixel metric is dominated by the one pixel at the edge of a rect the
+    // detector sized to 38 rather than 40, which says nothing about the removal.
+    const markError = (frame: Frame): number => {
+      let sum = 0
+      let count = 0
+      for (let row = IMAGE_MARK.y; row < IMAGE_MARK.y + IMAGE_MARK.height; row++) {
+        for (let col = IMAGE_MARK.x; col < IMAGE_MARK.x + IMAGE_MARK.width; col++) {
+          const index = row * IMAGE_WIDTH + col
+          sum += Math.abs(
+            (frame.data[index * frame.channels] as number) - (original.data[index * 3] as number)
+          )
+          count++
+        }
+      }
+      return sum / count
+    }
+
+    const errorBefore = markError(before)
+    const errorAfter = markError(after)
+    assert.ok(errorBefore > 5, `fixture should be visibly marked, error was ${errorBefore.toFixed(2)}`)
+    assert.ok(
+      errorAfter < errorBefore * 0.25,
+      `removal was weak: ${errorBefore.toFixed(2)} -> ${errorAfter.toFixed(2)}`
+    )
+
+    // Outside it: untouched, exactly. A lossless format has no excuse for drift, and
+    // "we only changed what we said we changed" is the whole claim of this tool.
+    let moved = 0
+    for (let row = 0; row < IMAGE_HEIGHT; row++) {
+      for (let col = 0; col < IMAGE_WIDTH; col++) {
+        const inside =
+          row >= IMAGE_MARK.y - 2 &&
+          row < IMAGE_MARK.y + IMAGE_MARK.height + 2 &&
+          col >= IMAGE_MARK.x - 2 &&
+          col < IMAGE_MARK.x + IMAGE_MARK.width + 2
+        if (inside) continue
+        const index = (row * IMAGE_WIDTH + col) * 4
+        if (before.data[index] !== after.data[index]) moved++
+      }
+    }
+    assert.equal(moved, 0, `${moved} pixels outside the mark changed`)
+  })
+
+  it("carries a transparency channel through untouched", async (t) => {
+    if (!ffmpegAvailable) return t.skip("ffmpeg not available")
+    const dir = await mkdtemp(join(tmpdir(), "gvowr-image-alpha-"))
+    const input = join(dir, "marked.png")
+    const output = join(dir, "clean.png")
+
+    const source = stamped(128)
+    await encodeImage(source, input, infoFor(source))
+
+    const result = await processImage(input, output, syntheticDiamond(40))
+    assert.equal(result.written, true, `nothing was written: ${result.reason}`)
+
+    const after = await decodeImage(output)
+    assert.equal(after.channels, 4)
+    for (let i = 3; i < after.data.length; i += 4) {
+      assert.equal(after.data[i], 128, `alpha changed at byte ${i}`)
+    }
+    assert.equal((await probeImage(output)).hasAlpha, true)
+  })
+
+  it("writes nothing at all when there is no mark to remove", async (t) => {
+    if (!ffmpegAvailable) return t.skip("ffmpeg not available")
+    const dir = await mkdtemp(join(tmpdir(), "gvowr-image-clean-"))
+    const input = join(dir, "plain.png")
+    const output = join(dir, "out.png")
+
+    const source = picture(null)
+    await encodeImage(source, input, infoFor(source))
+
+    const result = await processImage(input, output, syntheticDiamond(40))
+    assert.equal(result.written, false)
+    assert.equal(result.reason, "no-mark-found")
+    // An image with one bad frame is a bad image. Better to leave the original alone
+    // than to hand back a copy that quietly changed nothing.
+    assert.equal(existsSync(output), false)
+  })
+
+  it("refuses an output named as a different format rather than writing a mislabelled file", async (t) => {
+    if (!ffmpegAvailable) return t.skip("ffmpeg not available")
+    const dir = await mkdtemp(join(tmpdir(), "gvowr-image-format-"))
+    const input = join(dir, "marked.png")
+    const source = stamped(null)
+    await encodeImage(source, input, infoFor(source))
+
+    await assert.rejects(
+      () => processImage(input, join(dir, "clean.webp"), syntheticDiamond(40)),
+      /written back as png/
+    )
+  })
+
+  it("knows which extensions it reads", () => {
+    assert.equal(imageFormatFor("a.png"), "png")
+    assert.equal(imageFormatFor("a.JPG"), "jpeg")
+    assert.equal(imageFormatFor("a.jpeg"), "jpeg")
+    assert.equal(imageFormatFor("a.webp"), "webp")
+    assert.equal(imageFormatFor("a.mp4"), null)
+    assert.equal(imageFormatFor("a"), null)
   })
 })

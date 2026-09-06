@@ -242,14 +242,19 @@ a single frame and already do. What a still changes is everything around the fra
   of content and a diamond subtracted out of it — so a still is verified at the
   discovery bar, never the tracking bar.
 - **Full-frame sweep is the default**, not an Advanced option. On video a sweep every
-  frame is unaffordable; on one frame it costs about half a second. There is no reason
-  to look only in the corner.
+  frame is unaffordable; on one frame it is the whole job. Measured end to end on the
+  calibration frame: **2.8 s at 1280×720 and 13.4 s at 3840×2160**, of which decode is
+  0.2 s and 0.5 s — the rest is the sweep across candidate sizes at full resolution.
+  Analysing at reduced resolution and refining at full would cut the 4K case
+  substantially and has not been done (see §9).
 - **Failure means the file is not written.** A video with five bad frames is still worth
   producing, with those frames reported. An image with one bad frame is a bad image, so
   when nothing verifies, nothing is written and the UI says why.
-- **I/O is FFmpeg, as everywhere else.** No image library is added: FFmpeg already
-  decodes and encodes PNG, JPEG and WebP, and adding `sharp` would mean a native binary
-  per platform for something the existing sidecar does.
+- **I/O is FFmpeg, as everywhere else.** No image library is added: adding `sharp` would
+  mean a native binary per platform for something the existing sidecar does. The
+  encoder is looked up at runtime rather than assumed, because **not every FFmpeg build
+  can write WebP** — Homebrew's decodes it and cannot encode it. A missing encoder is
+  reported as the packaging fault it is; the format is never quietly substituted.
 - **Alpha is carried through untouched.** A PNG's transparency is decoded alongside the
   colour, held aside during the blend, and re-attached on write. Reverse blending is
   defined on the colour channels; the alpha channel is not ours to touch.
@@ -454,6 +459,15 @@ peer conflicts rather than caution. Re-check both when `eslint-config-next` upda
 | `eslint` | 9.39.5 | 10.10.0 | `eslint-plugin-react@7.37.5`, pulled in by `eslint-config-next`, caps at `^9.7`. Combined range across 15 consumers resolves to `^9.7.0`. |
 | `typescript` | 5.9.3 | 7.0.2 | `typescript-eslint@8.69.0` requires `>=4.8.4 <6.1.0`. TypeScript 6 is beta-only, so 5.9.3 is the newest stable that satisfies it. |
 
+### Known costs not yet paid down
+
+- **A 4K still takes 13 s**, nearly all of it the full-resolution sweep across candidate
+  sizes. A coarse pass at reduced resolution followed by a full-resolution refinement is
+  the obvious fix and is not built.
+- **The packaged sidecar must include a WebP encoder** (`libwebp`, or FFmpeg's native
+  `webp`). Without it the app can open a WebP and cannot write the result, which it
+  reports honestly but which is still a build we should not ship.
+
 ### Calibration inputs needed
 
 The detector can be built without these, but thresholds and priors must be set against
@@ -502,6 +516,23 @@ and the mark could only return through a sweep — at the discovery bar, which b
 footage does not reach. Sixteen frames kept their watermark as a result. A place the
 mark has just been is a prior, so locations now stay searchable for a bounded window
 after their last sighting (`reacquireFrames`).
+
+### Stills, measured
+
+On a frame lifted straight out of the calibration clip, mark at 1136,576:
+
+| Format | Mark patch mean | Control patch | Pixels outside the mark that moved |
+| --- | --- | --- | --- |
+| PNG | 30.0 → 3.3 | 1.7 → 1.7 | **0** |
+| JPEG | 30.3 → 3.7 | 1.7 → 1.7 | 76,823 |
+
+The PNG row is the claim this project makes, held exactly: the only pixels that changed
+are the ones the mark was on. The JPEG row is why the UI has to say in words that a JPEG
+was re-encoded — the removal is just as good, and seventy-six thousand pixels nowhere
+near the mark moved anyway, because that is what the format does.
+
+An RGBA source comes back with **zero alpha bytes changed**, and an image with no mark
+is refused rather than copied: nothing verifies, so nothing is written.
 
 ### How removal quality is measured
 

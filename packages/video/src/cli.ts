@@ -10,6 +10,7 @@ import {
   type ManualMark,
 } from "@gvowr/engine"
 
+import { processImage } from "./image.ts"
 import { probe } from "./probe.ts"
 import { processVideo } from "./process.ts"
 import type { EncoderChoice } from "./encode.ts"
@@ -19,6 +20,9 @@ const USAGE = `gvowr-video — watermark removal for video files
 Usage:
   gvowr-video probe <input>                 Report container and stream metadata
   gvowr-video clean <input> <output>        Remove watermarks and re-encode
+  gvowr-video image <input> <output>        Remove the watermark from a still
+                                            (.png .jpg .jpeg .webp; the output must
+                                            name the same format as the input)
 
 Options:
   --template <file.ppm>   Alpha template capture (default: measured Veo capture)
@@ -148,6 +152,72 @@ export async function main(argv: readonly string[]): Promise<number> {
           `The track was lost at ${ranges} and nothing was applied there.\n`
       )
       return 2
+    }
+    return 0
+  }
+
+  if (command === "image") {
+    const [input, output] = args
+    if (!input || !output) throw new Error("usage: gvowr-video image <input> <output>")
+
+    const template = await loadTemplate(values.template, values.size)
+    const result = await processImage(resolve(input), resolve(output), template, {
+      mode: parseMode(values.mode),
+      ...(values.manual ? { manualMarks: values.manual.map(parseManualMark) } : {}),
+    })
+
+    if (json) {
+      process.stdout.write(
+        JSON.stringify(
+          {
+            ...result.plan.diagnostics,
+            format: result.info.format,
+            hasAlpha: result.info.hasAlpha,
+            lossyRoundTrip: result.info.lossyRoundTrip,
+            regions: result.regions,
+            applied: result.applied,
+            skipped: result.skipped,
+            written: result.written,
+            reason: result.reason,
+          },
+          null,
+          2
+        ) + "\n"
+      )
+      // Nothing written is not success, whatever the exit code of a JSON run implies.
+      return result.written ? 0 : 2
+    }
+
+    const info = result.info
+    process.stdout.write(
+      `${info.width}x${info.height} ${info.codec} ${info.pixelFormat}` +
+        `${info.hasAlpha ? " (transparent)" : ""}\n`
+    )
+
+    if (!result.written) {
+      // The original is untouched and no file was written. Said as a refusal rather
+      // than a result, because an image with one bad region is a bad image.
+      process.stdout.write(
+        result.reason === "no-mark-found"
+          ? `  no watermark found — nothing was written, the original is untouched\n`
+          : `  a mark was found but could not be inverted into its surroundings — ` +
+              `nothing was written, the original is untouched\n`
+      )
+      return 2
+    }
+
+    for (const region of result.regions) {
+      process.stdout.write(
+        `  removed ${region.rect.width}px mark at ${region.rect.x},${region.rect.y} ` +
+          `(alpha ${region.alpha.toFixed(2)}, score ${region.confidence.toFixed(2)})\n`
+      )
+    }
+    process.stdout.write(`  written to ${output}\n`)
+    if (info.lossyRoundTrip) {
+      process.stdout.write(
+        `  note: a JPEG cannot be edited in place, so the whole image was re-encoded ` +
+          `at maximum quality. Pixels outside the mark change slightly.\n`
+      )
     }
     return 0
   }
