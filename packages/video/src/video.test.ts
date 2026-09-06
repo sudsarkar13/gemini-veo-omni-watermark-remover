@@ -179,6 +179,16 @@ describe("processVideo", () => {
       after < before * 0.4,
       `removal was weak: ${before.toFixed(2)} -> ${after.toFixed(2)}`
     )
+
+    // The check reads the encoded file, so this also says the correction survived
+    // h264 — a removal that only holds in the buffer we handed the encoder is not one.
+    assert.ok(result.residual, "the check should run by default")
+    assert.equal(result.residual.framesChecked, FRAMES)
+    assert.equal(
+      result.residual.framesMarked,
+      0,
+      `still reads as marked on ${result.residual.framesMarked} frames`
+    )
   })
 
   it("leaves clean footage alone", async (t) => {
@@ -190,6 +200,47 @@ describe("processVideo", () => {
 
     const result = await processVideo(clip, out, TEMPLATE, { sizes: [32] })
     assert.equal(result.plan.tracks.length, 0, "hallucinated a watermark in clean footage")
+    assert.equal(result.framesWritten, FRAMES)
+    assert.equal(result.residual?.framesMarked, 0, "the check hallucinated a leftover")
+  })
+
+  it("reports the mark the plan never found, which is the whole point of the check", async (t) => {
+    if (!ffmpegAvailable) return t.skip("ffmpeg not available")
+    const dir = await mkdtemp(join(tmpdir(), "gvowr-video-"))
+    const dirty = join(dir, "marked.mp4")
+    const out = join(dir, "out.mp4")
+    await makeClip(dirty, marked)
+
+    // A discovery bar nothing can clear. The plan comes back with nothing to do and
+    // every count it reports is honest — no tracks, no frames skipped, no failure —
+    // while the file it produced still carries the watermark. That gap is exactly
+    // what Pass 4 exists to close, so the check must not inherit the same blindness.
+    const result = await processVideo(dirty, out, TEMPLATE, {
+      sizes: [32],
+      discoveryThreshold: 0.99,
+      checkOptions: { sizes: [32] },
+    })
+
+    assert.equal(result.plan.tracks.length, 0, "fixture precondition: the plan finds nothing")
+    assert.equal(result.framesCorrected, 0)
+    assert.ok(result.residual, "the check should run")
+    assert.ok(
+      result.residual.framesMarked > FRAMES / 2,
+      `check only flagged ${result.residual.framesMarked} of ${FRAMES} frames`
+    )
+    assert.ok(result.residual.ranges.length >= 1)
+    assert.equal(result.residual.ranges[0]?.kind, "missed")
+  })
+
+  it("can be told not to check", async (t) => {
+    if (!ffmpegAvailable) return t.skip("ffmpeg not available")
+    const dir = await mkdtemp(join(tmpdir(), "gvowr-video-"))
+    const clip = join(dir, "clean.mp4")
+    const out = join(dir, "out.mp4")
+    await makeClip(clip, scene)
+
+    const result = await processVideo(clip, out, TEMPLATE, { sizes: [32], check: false })
+    assert.equal(result.residual, null)
     assert.equal(result.framesWritten, FRAMES)
   })
 })

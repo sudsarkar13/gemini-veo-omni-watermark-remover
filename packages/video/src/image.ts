@@ -4,6 +4,7 @@ import { extname } from "node:path"
 
 import {
   createPlanner,
+  createResidualChecker,
   renderFrame,
   type AlphaMap,
   type ClipPlan,
@@ -11,6 +12,8 @@ import {
   type PlanOptions,
   type Rect,
   type RenderOptions,
+  type ResidualOptions,
+  type ResidualReport,
 } from "@gvowr/engine"
 
 import { resolveBinaries, run, spawnStreaming } from "./ffmpeg.ts"
@@ -290,7 +293,11 @@ export async function encodeImage(
   }
 }
 
-export interface ProcessImageOptions extends PlanOptions, EncodeImageOptions, RenderOptions {}
+export interface ProcessImageOptions extends PlanOptions, EncodeImageOptions, RenderOptions {
+  /** Pass 4, the residual check. On unless switched off. */
+  readonly check?: boolean
+  readonly checkOptions?: ResidualOptions
+}
 
 export interface ImageRegion {
   readonly rect: Rect
@@ -317,6 +324,14 @@ export interface ProcessImageResult {
   readonly written: boolean
   /** Why nothing was written, in a form the UI can turn into a sentence. */
   readonly reason: "no-mark-found" | "not-invertible" | null
+  /**
+   * What the written file still shows.
+   *
+   * Null when nothing was written — there is no render to inspect, and reporting the
+   * check against the untouched original would attribute the mark to a file this app
+   * did not produce.
+   */
+  readonly residual: ResidualReport | null
 }
 
 /**
@@ -379,10 +394,24 @@ export async function processImage(
       // A region the user drew and the verifier refused is a different answer from
       // "nothing here": it is the case the fill exists for.
       reason: report.skipped > 0 || plan.refusals.length > 0 ? "not-invertible" : "no-mark-found",
+      residual: null,
     }
   }
 
   await encodeImage(frame, output, info, { metadataFrom: input, ...options })
+
+  // Pass 4, on what was actually written. A JPEG is re-encoded on the way out, so the
+  // check has to read the file back rather than trust the buffer we just corrected.
+  let residual: ResidualReport | null = null
+  if (options.check !== false) {
+    const written = await decodeImage(output, await probeImage(output))
+    const checker = createResidualChecker(template, {
+      tracks: plan.tracks,
+      ...(options.checkOptions ?? {}),
+    })
+    checker.push(written)
+    residual = checker.finish()
+  }
 
   return {
     info,
@@ -393,5 +422,6 @@ export async function processImage(
     filled: report.filled,
     written: true,
     reason: null,
+    residual,
   }
 }

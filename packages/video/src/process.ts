@@ -1,6 +1,7 @@
 import {
   coverage,
   createPlanner,
+  createResidualChecker,
   renderFrame,
   type AlphaMap,
   type ClipPlan,
@@ -8,6 +9,8 @@ import {
   type Frame,
   type PlanOptions,
   type RenderOptions,
+  type ResidualOptions,
+  type ResidualReport,
 } from "@gvowr/engine"
 
 import { decodeFrames } from "./decode.ts"
@@ -26,6 +29,10 @@ import { probe, type VideoInfo } from "./probe.ts"
 export interface ProcessOptions extends PlanOptions, EncodeOptions, RenderOptions {
   readonly onAnalyseProgress?: (frame: number, total: number) => void
   readonly onRenderProgress?: (frame: number, total: number) => void
+  /** Pass 4, the residual check. On unless switched off. */
+  readonly check?: boolean
+  readonly checkOptions?: ResidualOptions
+  readonly onCheckProgress?: (frame: number, total: number) => void
 }
 
 export interface ProcessResult {
@@ -46,6 +53,8 @@ export interface ProcessResult {
    */
   readonly coverage: Coverage
   readonly audioCopied: boolean
+  /** What the finished file still shows. Null when the check was switched off. */
+  readonly residual: ResidualReport | null
 }
 
 export async function processVideo(
@@ -92,9 +101,31 @@ export async function processVideo(
     audioFrom: options.audioFrom ?? input,
   })
 
+  // Pass 4: check the render. Deliberately the encoded file rather than the frames we
+  // just handed the encoder — compression is part of what the user will see, and a
+  // correction that survives renderFrame but not CRF 14 is still a correction that
+  // did not survive.
+  const residual = options.check === false ? null : await check()
+
+  async function check(): Promise<ResidualReport> {
+    const outputInfo = await probe(output)
+    const checker = createResidualChecker(template, {
+      tracks: plan.tracks,
+      ...(options.checkOptions ?? {}),
+    })
+    let checked = 0
+    for await (const frame of decodeFrames(output, outputInfo)) {
+      checker.push(frame)
+      checked++
+      options.onCheckProgress?.(checked, outputInfo.frameCount)
+    }
+    return checker.finish()
+  }
+
   return {
     info,
     plan,
+    residual,
     framesWritten: encoded.framesWritten,
     framesCorrected: corrected,
     framesLeftUntouched: untouched,

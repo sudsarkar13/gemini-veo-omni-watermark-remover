@@ -8,6 +8,7 @@ import {
   syntheticDiamond,
   type AlphaMap,
   type ManualMark,
+  type ResidualReport,
 } from "@gvowr/engine"
 
 import { processImage } from "./image.ts"
@@ -35,6 +36,9 @@ Options:
   --fill                  Synthesise pixels for regions the exact path declined.
                           Off by default. Invents rather than recovers, so what it
                           touches is reported as "filled", never as corrected.
+  --no-check              Skip the residual check. The check re-reads the finished
+                          file and reports what still carries a mark; without it
+                          the summary only says what the plan decided to do.
   --crf <n>               Quality, lower is better (14)
   --preset <name>         x264 preset (slow)
   --encoder <auto|software|hardware>
@@ -52,6 +56,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       manual: { type: "string", multiple: true },
       "sweep-interval": { type: "string" },
       fill: { type: "boolean", default: false },
+      "no-check": { type: "boolean", default: false },
       crf: { type: "string" },
       preset: { type: "string" },
       encoder: { type: "string" },
@@ -95,6 +100,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     const result = await processVideo(resolve(input), resolve(output), template, {
       mode: parseMode(values.mode),
       ...(values.fill ? { fill: true } : {}),
+      ...(values["no-check"] ? { check: false } : {}),
       ...(values.manual ? { manualMarks: values.manual.map(parseManualMark) } : {}),
       ...(values["sweep-interval"] ? { sweepInterval: Number(values["sweep-interval"]) } : {}),
       ...(values.crf ? { crf: Number(values.crf) } : {}),
@@ -108,6 +114,9 @@ export async function main(argv: readonly string[]): Promise<number> {
             },
             onRenderProgress: (frame: number, total: number) => {
               lastPercent = report("rendering", frame, total, lastPercent)
+            },
+            onCheckProgress: (frame: number, total: number) => {
+              lastPercent = report("checking", frame, total, lastPercent)
             },
           }),
     })
@@ -125,6 +134,7 @@ export async function main(argv: readonly string[]): Promise<number> {
             framesFilled: result.framesFilled,
             coverage: result.coverage,
             audioCopied: result.audioCopied,
+            residual: result.residual,
           },
           null,
           2
@@ -150,6 +160,11 @@ export async function main(argv: readonly string[]): Promise<number> {
           `was covered\n`
       )
     }
+    // The check read the file that came out, so it outranks everything above it —
+    // those numbers are the plan's own account of itself.
+    const leftovers = describeResidual(result.residual)
+    if (leftovers) process.stdout.write(leftovers)
+
     // Said plainly and last, because it is the one number that means the output is
     // not clean. Burying it would make the summary above a lie by omission.
     if (result.coverage.framesUncovered > 0) {
@@ -162,7 +177,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       )
       return 2
     }
-    return 0
+    return leftovers ? 2 : 0
   }
 
   if (command === "image") {
@@ -171,6 +186,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
     const template = await loadTemplate(values.template, values.size)
     const result = await processImage(resolve(input), resolve(output), template, {
+      ...(values["no-check"] ? { check: false } : {}),
       mode: parseMode(values.mode),
       ...(values.fill ? { fill: true } : {}),
       ...(values.manual ? { manualMarks: values.manual.map(parseManualMark) } : {}),
@@ -190,6 +206,7 @@ export async function main(argv: readonly string[]): Promise<number> {
             filled: result.filled,
             written: result.written,
             reason: result.reason,
+            residual: result.residual,
           },
           null,
           2
@@ -232,6 +249,14 @@ export async function main(argv: readonly string[]): Promise<number> {
       )
     }
     process.stdout.write(`  written to ${output}\n`)
+    if (result.residual && result.residual.framesMarked > 0) {
+      const where = result.residual.ranges
+        .map((range) => `${range.rect.width}px at ${range.rect.x},${range.rect.y}`)
+        .join(", ")
+      process.stdout.write(
+        `  WARNING: the written image still reads as marked — ${where}\n`
+      )
+    }
     if (info.lossyRoundTrip) {
       process.stdout.write(
         `  note: a JPEG cannot be edited in place, so the whole image was re-encoded ` +
@@ -291,4 +316,32 @@ export function parseMode(value: string | undefined): "auto" | "corner" | "sweep
 export function parseEncoder(value: string): EncoderChoice {
   if (value === "auto" || value === "software" || value === "hardware") return value
   throw new Error(`--encoder expects auto, software or hardware but got "${value}"`)
+}
+
+/**
+ * The residual check's verdict, in words, or nothing at all.
+ *
+ * It never says "clean". What the check established is that the detector looked and
+ * found nothing, and that is a weaker claim than the picture being unmarked — the
+ * whole reason this pass exists is that the app was previously reporting the plan's
+ * intentions as if they were facts about the output.
+ *
+ * Silence on a good run is deliberate. A line reading "no leftovers" printed after
+ * every successful clean trains people to stop reading the last line of the summary,
+ * which is precisely the line that matters on the run where there is one.
+ */
+function describeResidual(report: ResidualReport | null): string | null {
+  if (!report || report.framesMarked === 0) return null
+  const ranges = report.ranges
+    .map((range) => {
+      const span = range.from === range.to ? `${range.from}` : `${range.from}-${range.to}`
+      return `${span} ${range.kind} (${range.rect.width}px at ${range.rect.x},${range.rect.y})`
+    })
+    .join(", ")
+  return (
+    `  WARNING: the finished file still reads as marked on ${report.framesMarked} ` +
+    `frame(s): ${ranges}\n` +
+    `  A range starts where the mark was confirmed; sweeps are ${report.sweepInterval} ` +
+    `frames apart, so it may have appeared earlier than the number shown.\n`
+  )
 }
