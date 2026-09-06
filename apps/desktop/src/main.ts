@@ -206,6 +206,40 @@ async function createWindow(): Promise<void> {
     if (seed) {
       await queue.add([seed])
       await new Promise((resolve) => setTimeout(resolve, 1200))
+
+      // Exercises the media path from the renderer's side of the bridge: the clip-wide
+      // strip and then one zoomed window. Neither can be typechecked into working —
+      // they cross the preload bridge, the IPC channel and the media protocol — and
+      // both fail silently in the UI, as a filmstrip that simply never appears.
+      const media = await window.webContents.executeJavaScript(
+        `(async () => {
+           const jobs = await window.gvowr.listJobs()
+           const id = jobs[0] && jobs[0].id
+           if (!id) return "no-job"
+           const clip = await window.gvowr.getMedia(id)
+           const strip = await window.gvowr.getFilmstrip(id, 0, 1, 8)
+           // Loading one of them is the point: a URL the protocol cannot resolve looks
+           // exactly like a URL it can until the picture fails to arrive. Loaded as an
+           // image rather than fetched — the renderer is served from app:// and a
+           // cross-scheme fetch is refused by CORS even when the protocol is working.
+           let served = "skipped"
+           if (strip && strip.thumbnails[0]) {
+             served = await new Promise((resolve) => {
+               const image = new Image()
+               image.onload = () => resolve(image.naturalWidth + "x" + image.naturalHeight)
+               image.onerror = () => resolve("failed")
+               image.src = strip.thumbnails[0]
+             })
+           }
+           return [
+             "thumbs=" + (clip ? clip.thumbnails.length : "null"),
+             "window=" + (strip ? strip.thumbnails.length : "null"),
+             "interval=" + (strip ? strip.interval.toFixed(3) : "null"),
+             "served=" + served,
+           ].join(" ")
+         })()`
+      )
+      process.stdout.write(`SMOKE media ${media}\n`)
     }
 
     // Optional screenshot, so the rendered result can be inspected rather than
