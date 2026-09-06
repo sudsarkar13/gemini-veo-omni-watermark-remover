@@ -282,6 +282,40 @@ UI design.
 - On a still, the fill needs a region: it runs where a mark was found and refused, or
   where the user drew one by hand and the engine could not invert it.
 
+### 5.9 Results, and why nothing is written beside your original
+
+A run does not put a file next to the source. It writes into the application's own
+store and leaves it there until the user exports it.
+
+The reason is that a removal is a draft until somebody has looked at it. Writing
+`clip_clean.mp4` beside `clip.mp4` the moment a run finishes fills the user's folders
+with files they have not inspected, and makes "try it again with Fill on" leave litter
+behind. Keeping the result in the app also means it is still there to be re-examined —
+which is what the later vision pass will need (`PLAN.md` §11).
+
+| Control | Type | Behaviour |
+| --- | --- | --- |
+| Sidebar tabs | `Queue` · `Results` | Results carries a count. Queue is work to do; Results is work done. |
+| Result row | List item | Thumbnail, source name, size, when it was made, and either "clears in N days" or "exported to …". |
+| Export | Button on the row and in the action bar | Writes to the default export folder (Settings), named `{name}_clean{ext}`. |
+| Export as… | Menu item | Native save dialog. |
+| Reveal | Row action | Shows the exported file, or the stored one if it has not been exported. |
+| Delete | Row action | Removes the stored file now. Confirms only if it has never been exported. |
+| Open store folder | Settings → Storage | Reveals the application's store in the file manager. |
+| Storage used | Settings → Storage | Total size, and a **Clear all** that asks first. |
+| Keep results for | Settings → Storage | `7 days` · **`30 days`** · `90 days` · `Forever`. |
+
+**After a successful export the stored copy is deleted and the row stays**, marked
+*exported to …*. The file is only removed once the copy is confirmed in place — if the
+export fails or is cancelled, the stored copy is exactly where it was.
+
+**Automatic clearing** runs at launch and daily: anything past the retention window
+that was never exported is deleted, and the row goes with it. Exported rows are already
+fileless and are kept as history.
+
+**The action bar after a run** reads `Kept in the app · 41 MB · clears in 30 days` with
+`Reveal` and `Export`. It never says "Saved to …" for a file the user has not asked for.
+
 ### 5.4 Advanced drawer
 
 Collapsed by default. Open state persists per user, not per clip. Nothing in here is
