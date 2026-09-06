@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs"
-import { stat, writeFile } from "node:fs/promises"
+import { mkdir, stat, writeFile } from "node:fs/promises"
 import { cpus, freemem, tmpdir, totalmem } from "node:os"
 import { basename, join, normalize, resolve, sep } from "node:path"
 import { Readable } from "node:stream"
@@ -37,6 +37,8 @@ import {
   type JobOptions,
   type JobProgress,
   type Settings,
+  type StorageUsage,
+  type StoredResult,
   type SystemInfo,
 } from "@gvowr/ipc"
 import {
@@ -47,6 +49,7 @@ import {
   thumbnailUrl,
 } from "./media.ts"
 import { isFinished, JobQueue } from "./queue.ts"
+import { exportPathFor, ResultStore } from "./results.ts"
 import { SettingsStore } from "./settings.ts"
 
 /**
@@ -139,6 +142,10 @@ const MAX_WINDOW_THUMBNAILS = 60
 let filmstripSequence = 0
 let queue: JobQueue
 let settings: SettingsStore
+let results: ResultStore
+
+/** How often the retention window is applied while the app is running. */
+const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 function broadcast(channel: string, ...args: unknown[]): void {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args)
@@ -274,6 +281,28 @@ async function createWindow(): Promise<void> {
             `corrected=${final?.result?.framesCorrected ?? "n/a"} ` +
             `output=${final?.result?.outputPath ?? "none"}\n`
         )
+        // Exercises the export path from the renderer's side of the bridge: preload,
+        // channel, store, and the copy-verify-delete order that protects the only
+        // copy of somebody's render.
+        if (process.env["GVOWR_SMOKE_EXPORT"] === "1") {
+          const exported = await window.webContents.executeJavaScript(
+            `(async () => {
+               const rows = await window.gvowr.listResults()
+               if (rows.length === 0) return "no results"
+               const updated = await window.gvowr.exportResult(rows[0].id)
+               const after = await window.gvowr.listResults()
+               const usage = await window.gvowr.storageUsage()
+               return [
+                 "exportedTo=" + updated.exportedTo,
+                 "rowsKept=" + after.length,
+                 "stillWaiting=" + after.filter((r) => r.exportedTo === null).length,
+                 "usageBytes=" + usage.bytes,
+               ].join(" ")
+             })()`
+          )
+          process.stdout.write(`SMOKE export ${exported}\n`)
+        }
+
         // Long enough for the renderer to receive the final snapshot and repaint.
         await new Promise((resolve) => setTimeout(resolve, 1500))
       }
@@ -369,12 +398,13 @@ function registerHandlers(): void {
   ipcMain.handle(CHANNELS.jobsClearFinished, () => queue.clearFinished())
   ipcMain.handle(CHANNELS.jobsCancel, (_event, id: string) => queue.cancel(id))
 
-  ipcMain.handle(CHANNELS.jobsStart, (_event, id: string, options: JobOptions = {}) => {
+  ipcMain.handle(CHANNELS.jobsStart, async (_event, id: string, options: JobOptions = {}) => {
     const current = settings.get()
-    queue.start(id, {
+    // Where the result goes is no longer a run option: it goes to the store, and the
+    // user decides where it lands when they export it.
+    await queue.start(id, {
       crf: current.crf,
       encoder: current.encoder,
-      ...(current.outputDirectory ? { outputDirectory: current.outputDirectory } : {}),
       ...options,
     })
   })
@@ -526,6 +556,67 @@ function registerHandlers(): void {
     }
   )
 
+  ipcMain.handle(CHANNELS.resultsList, (): StoredResult[] => results.list())
+
+  ipcMain.handle(CHANNELS.resultsUsage, (): StorageUsage => ({
+    bytes: results.usageBytes(),
+    count: results.list().filter((entry) => entry.exportedTo === null).length,
+    directory: results.root,
+  }))
+
+  ipcMain.handle(CHANNELS.resultsExport, async (_event, id: string): Promise<StoredResult> => {
+    const entry = results.find(id)
+    if (!entry) throw new Error("that result is no longer in the store")
+    const updated = await results.export(id, exportPathFor(entry, settings.get().exportDirectory))
+    broadcast(EVENTS.resultsChanged, results.list())
+    return updated
+  })
+
+  ipcMain.handle(
+    CHANNELS.resultsExportAs,
+    async (_event, id: string): Promise<StoredResult | null> => {
+      const entry = results.find(id)
+      if (!entry) throw new Error("that result is no longer in the store")
+
+      const suggested = exportPathFor(entry, settings.get().exportDirectory)
+      const chosen = await dialog.showSaveDialog({
+        defaultPath: suggested,
+        title: "Export result",
+      })
+      // Cancelling must leave the result exactly where it was, which it does: nothing
+      // has been copied or deleted at this point.
+      if (chosen.canceled || !chosen.filePath) return null
+
+      const updated = await results.export(id, chosen.filePath)
+      broadcast(EVENTS.resultsChanged, results.list())
+      return updated
+    }
+  )
+
+  ipcMain.handle(CHANNELS.resultsRemove, async (_event, id: string) => {
+    await results.remove(id)
+    broadcast(EVENTS.resultsChanged, results.list())
+  })
+
+  ipcMain.handle(CHANNELS.resultsReveal, (_event, id: string) => {
+    const entry = results.find(id)
+    if (!entry) return
+    // The exported file if there is one, otherwise the copy still in the store.
+    shell.showItemInFolder(entry.exportedTo ?? entry.storedPath)
+  })
+
+  ipcMain.handle(CHANNELS.resultsClear, async () => {
+    await results.clear()
+    broadcast(EVENTS.resultsChanged, results.list())
+  })
+
+  ipcMain.handle(CHANNELS.resultsOpenFolder, async () => {
+    // Created on demand: a user asking to see the folder before any run should find
+    // one, not an error.
+    await mkdir(results.root, { recursive: true })
+    await shell.openPath(results.root)
+  })
+
   ipcMain.handle(CHANNELS.systemInfo, async (): Promise<SystemInfo> => {
     let ffmpegAvailable = true
     let ffmpegError: string | null = null
@@ -578,11 +669,38 @@ if (!app.requestSingleInstanceLock()) {
     settings = new SettingsStore(app.getPath("userData"))
     const loaded = await settings.load()
 
+    results = new ResultStore(app.getPath("userData"))
+    await results.load()
+    // At launch and then daily. Anything past the window that was never exported goes,
+    // so a machine left alone for a month does not quietly fill up with renders
+    // nobody looked at.
+    await results.sweep(loaded.retentionDays)
+    setInterval(() => {
+      void results.sweep(settings.get().retentionDays).then((removed: number) => {
+        if (removed > 0) broadcast(EVENTS.resultsChanged, results.list())
+      })
+    }, SWEEP_INTERVAL_MS)
+
     queue = new JobQueue(
       {
         onChanged: (jobs) => broadcast(EVENTS.jobsChanged, jobs),
         onProgress: (id: string, progress: JobProgress) =>
           broadcast(EVENTS.jobProgress, id, progress),
+        resolveOutput: (job) => results.pathFor(job.id, job.inputPath),
+        onCompleted: (job, outputPath) => {
+          void results
+            .add({
+              id: job.id,
+              fileName: job.fileName,
+              sourcePath: job.inputPath,
+              storedPath: outputPath,
+              kind: job.info?.kind ?? "video",
+              framesCorrected: job.result?.framesCorrected ?? 0,
+              framesFilled: job.result?.framesFilled ?? 0,
+              framesUncovered: job.result?.framesUncovered ?? 0,
+            })
+            .then(() => broadcast(EVENTS.resultsChanged, results.list()))
+        },
       },
       join(here, "worker.cjs")
     )

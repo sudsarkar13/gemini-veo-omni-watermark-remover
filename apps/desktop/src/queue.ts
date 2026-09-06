@@ -23,6 +23,15 @@ import type { StartMessage, WorkerMessage } from "./worker.ts"
 export interface QueueEvents {
   onChanged(jobs: Job[]): void
   onProgress(id: string, progress: JobProgress): void
+  /**
+   * Where this job's output should be written.
+   *
+   * Asked rather than computed, because the queue has no business deciding that a
+   * render belongs in the application's store rather than beside the user's file.
+   */
+  resolveOutput(job: Job): Promise<string>
+  /** Called once a run has produced a file, so it can be recorded and kept. */
+  onCompleted(job: Job, outputPath: string): void
 }
 
 interface Running {
@@ -141,7 +150,7 @@ export class JobQueue {
     this.#emit()
   }
 
-  start(id: string, options: JobOptions = {}): void {
+  async start(id: string, options: JobOptions = {}): Promise<void> {
     const job = this.#jobs.get(id)
     if (!job || this.#running.has(id)) return
     if (job.state === "processing" || job.state === "analysing") return
@@ -151,7 +160,18 @@ export class JobQueue {
     }
     if (this.#running.size >= this.#maxConcurrent) return
 
-    const output = outputPathFor(job.inputPath, options.outputDirectory ?? null)
+    let output: string
+    try {
+      output = await this.#events.resolveOutput(job)
+    } catch (error) {
+      this.#update(id, {
+        state: "failed",
+        error: `could not prepare somewhere to write the result: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      })
+      return
+    }
     const child = fork(this.#workerPath, [], {
       // Silencing stdio keeps a chatty child from flooding the main process; failures
       // still arrive as structured messages.
@@ -278,6 +298,11 @@ export class JobQueue {
         progress: null,
         result: { ...result, outputPath: result.written ? output : null },
       })
+
+      // Recorded only when there is a file. A run that wrote nothing has nothing to
+      // keep, export, or clear later.
+      const finished = this.#jobs.get(id)
+      if (result.written && finished) this.#events.onCompleted(finished, output)
       return
     }
 
@@ -349,7 +374,13 @@ async function describeImage(path: string): Promise<ClipInfo> {
   }
 }
 
-/** `clip.mp4` becomes `clip_clean.mp4`, beside the source unless told otherwise. */
+/**
+ * `clip.mp4` becomes `clip_clean.mp4`.
+ *
+ * No longer where a run writes — that goes to the application's store — but still the
+ * name an export uses, and still the answer for anything that needs a destination
+ * beside the source.
+ */
 export function outputPathFor(input: string, outputDirectory: string | null): string {
   const extension = extname(input) || ".mp4"
   const stem = basename(input, extension)

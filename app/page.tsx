@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/app/empty-state"
 import { QueueSidebar } from "@/components/app/queue-sidebar"
 import { SettingsDialog } from "@/components/app/settings-dialog"
 import { TitleBar } from "@/components/app/title-bar"
-import { useJobs, useSettings, useSystemInfo, useTheme } from "@/hooks/use-desktop"
+import { useJobs, useResults, useSettings, useSystemInfo, useTheme } from "@/hooks/use-desktop"
 import { cn } from "@/lib/utils"
 
 /**
@@ -20,6 +20,16 @@ import { cn } from "@/lib/utils"
 export default function Page() {
   const { jobs, addFiles, addPaths, clearFinished, start, cancel, reveal } = useJobs()
   const { settings, update } = useSettings()
+  const {
+    results,
+    usage,
+    exportResult,
+    exportResultAs,
+    removeResult,
+    revealResult,
+    clearResults,
+    openFolder,
+  } = useResults()
   const system = useSystemInfo()
   useTheme(settings.theme)
 
@@ -65,18 +75,28 @@ export default function Page() {
       <div className="relative flex min-h-0 flex-1">
         <QueueSidebar
           jobs={jobs}
+          results={results}
+          retentionDays={settings.retentionDays}
           selectedId={selectedId}
           onSelect={setChosenId}
           onAdd={() => void addFiles()}
           onClearFinished={() => void clearFinished()}
+          onExport={(id) => void exportResult(id)}
+          onExportAs={(id) => void exportResultAs(id)}
+          onRevealResult={(id) => void revealResult(id)}
+          onRemoveResult={(id) => void removeResult(id)}
         />
 
         {selected ? (
           <ClipDetail
             job={selected}
+            result={results.find((entry) => entry.id === selected.id) ?? null}
+            retentionDays={settings.retentionDays}
             onStart={(options: JobOptions) => void start(selected.id, options)}
             onCancel={() => void cancel(selected.id)}
             onReveal={() => void reveal(selected.id)}
+            onExport={() => void exportResult(selected.id)}
+            onExportAs={() => void exportResultAs(selected.id)}
           />
         ) : (
           <EmptyState system={system} onAdd={() => void addFiles()} />
@@ -96,7 +116,14 @@ export default function Page() {
         </div>
       </div>
 
-      <SettingsDialog settings={settings} system={system} onChange={update} />
+      <SettingsDialog
+        settings={settings}
+        system={system}
+        usage={usage}
+        onChange={update}
+        onClearResults={() => void clearResults()}
+        onOpenResultsFolder={() => void openFolder()}
+      />
     </div>
   )
 }

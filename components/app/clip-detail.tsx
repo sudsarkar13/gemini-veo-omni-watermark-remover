@@ -1,8 +1,8 @@
 "use client"
 
-import { AlertTriangle, Brush, FolderOpen, Play, SearchX, Square } from "lucide-react"
+import { AlertTriangle, Brush, FolderOpen, Play, SearchX, Square, Upload } from "lucide-react"
 import { useState } from "react"
-import type { Job, JobOptions, ManualMarkInput } from "@gvowr/ipc"
+import type { Job, JobOptions, ManualMarkInput, StoredResult } from "@gvowr/ipc"
 
 import { AdvancedDrawer, DEFAULT_OPTIONS } from "@/components/app/advanced-drawer"
 import { ComparePlayer } from "@/components/app/compare-player"
@@ -34,14 +34,23 @@ import { formatBytes, formatDuration } from "@/lib/format"
  */
 export function ClipDetail({
   job,
+  result,
+  retentionDays,
   onStart,
   onCancel,
   onReveal,
+  onExport,
+  onExportAs,
 }: {
   job: Job
+  /** The stored render for this job, if the run produced one. */
+  result: StoredResult | null
+  retentionDays: number
   onStart: (options: JobOptions) => void
   onCancel: () => void
   onReveal: () => void
+  onExport: () => void
+  onExportAs: () => void
 }) {
   const [options, setOptions] = useState<JobOptions>(DEFAULT_OPTIONS)
   const [currentTime, setCurrentTime] = useState(0)
@@ -340,24 +349,49 @@ export function ClipDetail({
       </div>
 
       <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-sidebar px-4 py-2.5">
-        <div className="min-w-0 text-[11px] text-muted-foreground">
-          {job.result?.outputPath ? (
-            <span className="truncate" title={job.result.outputPath}>
-              Saved to {job.result.outputPath}
+        {/*
+          * Never "Saved to …" for a file nobody asked for. A finished run is kept in
+          * the app until it is exported, and the bar says where it is, how big it is,
+          * and how long it has — because an unexported result is on a clock.
+          */}
+        {/* `flex-1` as well as `min-w-0`: without it this sizes to its content, and a
+            long export path pushes straight through the buttons instead of eliding. */}
+        <div className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+          {result?.exportedTo ? (
+            <span className="block truncate" title={result.exportedTo}>
+              Exported to {result.exportedTo}
+            </span>
+          ) : result ? (
+            <span className="block truncate tabular">
+              Kept in the app · {formatBytes(result.sizeBytes)} ·{" "}
+              {retentionDays > 0
+                ? `clears in ${daysLeft(result.createdAt, retentionDays)} days`
+                : "kept until you delete it"}
             </span>
           ) : job.result && !job.result.written ? (
             <span>Nothing was written — the original is untouched.</span>
           ) : (
-            <span>Output is written next to the original.</span>
+            <span>Results are kept in the app until you export them.</span>
           )}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {job.result?.outputPath && (
-            <Button variant="secondary" size="sm" onClick={onReveal}>
+          {result && (
+            <Button variant="ghost" size="sm" onClick={onReveal}>
               <FolderOpen className="size-4" />
-              Show file
+              Reveal
             </Button>
+          )}
+          {result && result.exportedTo === null && (
+            <>
+              <Button variant="secondary" size="sm" onClick={onExport}>
+                <Upload className="size-4" />
+                Export
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onExportAs}>
+                Export as…
+              </Button>
+            </>
           )}
           {busy ? (
             <Button variant="destructive" size="sm" onClick={onCancel}>
@@ -383,4 +417,10 @@ export function ClipDetail({
       </footer>
     </section>
   )
+}
+
+/** Whole days remaining before a stored result is cleared automatically. */
+function daysLeft(createdAt: number, retentionDays: number): number {
+  const elapsed = (Date.now() - createdAt) / (24 * 60 * 60 * 1000)
+  return Math.max(0, Math.ceil(retentionDays - elapsed))
 }

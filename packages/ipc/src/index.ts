@@ -207,7 +207,6 @@ export interface JobOptions {
   readonly preset?: string
   readonly encoder?: "auto" | "software" | "hardware"
   readonly templatePath?: string
-  readonly outputDirectory?: string
   readonly region?: { x: number; y: number; width: number; height: number }
   readonly gain?: number
   /**
@@ -234,6 +233,37 @@ export interface ManualMarkInput {
   readonly toFrame: number
 }
 
+/**
+ * A finished render, kept in the application rather than beside the source.
+ *
+ * `storedPath` is inside the app's own directory and is deleted on export; from then
+ * on the row survives with `exportedTo` set, because knowing where a render went is
+ * worth more than the row it costs.
+ */
+export interface StoredResult {
+  /** The job that produced it. Re-running a job replaces its result. */
+  readonly id: string
+  readonly fileName: string
+  readonly sourcePath: string
+  readonly storedPath: string
+  readonly kind: MediaKind
+  readonly sizeBytes: number
+  readonly createdAt: number
+  /** Where the user exported it, or null while it is still only in the app. */
+  readonly exportedTo: string | null
+  readonly exportedAt: number | null
+  /** Enough of the run to make the row meaningful without reopening the job. */
+  readonly framesCorrected: number
+  readonly framesFilled: number
+  readonly framesUncovered: number
+}
+
+export interface StorageUsage {
+  readonly bytes: number
+  readonly count: number
+  readonly directory: string
+}
+
 export interface SystemInfo {
   readonly platform: NodeJS.Platform
   readonly arch: string
@@ -249,12 +279,20 @@ export interface SystemInfo {
 export interface Settings {
   readonly theme: "system" | "dark" | "light"
   readonly maxConcurrentJobs: number
-  readonly outputDirectory: string | null
   readonly encoder: "auto" | "software" | "hardware"
   readonly crf: number
   /** Diagnostics are opt-in and stay off until explicitly enabled. */
   readonly diagnosticsEnabled: boolean
   readonly feedbackPromptEnabled: boolean
+  /**
+   * Days a result is kept before it is cleared automatically. Zero means forever.
+   *
+   * Only unexported results age out — an exported one holds no file, and its row is
+   * history rather than storage.
+   */
+  readonly retentionDays: number
+  /** Where Export writes by default. Null means alongside the source file. */
+  readonly exportDirectory: string | null
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -263,11 +301,12 @@ export const DEFAULT_SETTINGS: Settings = {
   // internally, so running several clips mostly causes memory pressure and makes
   // every job slower.
   maxConcurrentJobs: 1,
-  outputDirectory: null,
   encoder: "auto",
   crf: 14,
   diagnosticsEnabled: false,
   feedbackPromptEnabled: true,
+  retentionDays: 30,
+  exportDirectory: null,
 }
 
 /** Channels the renderer may invoke. Anything not listed here is not reachable. */
@@ -282,6 +321,14 @@ export const CHANNELS = {
   jobsReveal: "jobs:reveal",
   jobsMedia: "jobs:media",
   jobsFilmstrip: "jobs:filmstrip",
+  resultsList: "results:list",
+  resultsExport: "results:export",
+  resultsExportAs: "results:export-as",
+  resultsRemove: "results:remove",
+  resultsReveal: "results:reveal",
+  resultsClear: "results:clear",
+  resultsUsage: "results:usage",
+  resultsOpenFolder: "results:open-folder",
   systemInfo: "system:info",
   settingsGet: "settings:get",
   settingsSet: "settings:set",
@@ -294,6 +341,7 @@ export const CHANNELS = {
 export const EVENTS = {
   jobsChanged: "jobs:changed",
   jobProgress: "job:progress",
+  resultsChanged: "results:changed",
 } as const
 
 /** The surface exposed on `window.gvowr` by the preload bridge. */
@@ -320,6 +368,17 @@ export interface DesktopApi {
   minimiseWindow(): void
   maximiseWindow(): void
   closeWindow(): void
+  listResults(): Promise<StoredResult[]>
+  /** Exports to the default folder. Returns the updated row. */
+  exportResult(id: string): Promise<StoredResult>
+  /** Opens a save dialog first. Null when the user cancels. */
+  exportResultAs(id: string): Promise<StoredResult | null>
+  removeResult(id: string): Promise<void>
+  revealResult(id: string): Promise<void>
+  clearResults(): Promise<void>
+  storageUsage(): Promise<StorageUsage>
+  openResultsFolder(): Promise<void>
+  onResultsChanged(listener: (results: StoredResult[]) => void): () => void
   onJobsChanged(listener: (jobs: Job[]) => void): () => void
   onJobProgress(listener: (id: string, progress: JobProgress) => void): () => void
 }

@@ -13,6 +13,8 @@ import {
   type JobOptions,
   type JobProgress,
   type Settings,
+  type StorageUsage,
+  type StoredResult,
 } from "@gvowr/ipc"
 
 /**
@@ -45,6 +47,15 @@ const api: DesktopApi = {
       toSeconds,
       count
     ) as Promise<FilmstripWindow | null>,
+  listResults: () => ipcRenderer.invoke(CHANNELS.resultsList) as Promise<StoredResult[]>,
+  exportResult: (id) => ipcRenderer.invoke(CHANNELS.resultsExport, id) as Promise<StoredResult>,
+  exportResultAs: (id) =>
+    ipcRenderer.invoke(CHANNELS.resultsExportAs, id) as Promise<StoredResult | null>,
+  removeResult: (id) => ipcRenderer.invoke(CHANNELS.resultsRemove, id) as Promise<void>,
+  revealResult: (id) => ipcRenderer.invoke(CHANNELS.resultsReveal, id) as Promise<void>,
+  clearResults: () => ipcRenderer.invoke(CHANNELS.resultsClear) as Promise<void>,
+  storageUsage: () => ipcRenderer.invoke(CHANNELS.resultsUsage) as Promise<StorageUsage>,
+  openResultsFolder: () => ipcRenderer.invoke(CHANNELS.resultsOpenFolder) as Promise<void>,
   systemInfo: () => ipcRenderer.invoke(CHANNELS.systemInfo),
   getSettings: () => ipcRenderer.invoke(CHANNELS.settingsGet) as Promise<Settings>,
   setSettings: (partial) => ipcRenderer.invoke(CHANNELS.settingsSet, partial) as Promise<Settings>,
@@ -57,6 +68,12 @@ const api: DesktopApi = {
     const handler = (_event: unknown, jobs: Job[]): void => listener(jobs)
     ipcRenderer.on(EVENTS.jobsChanged, handler)
     return () => ipcRenderer.removeListener(EVENTS.jobsChanged, handler)
+  },
+
+  onResultsChanged: (listener: (results: StoredResult[]) => void) => {
+    const handler = (_event: unknown, results: StoredResult[]): void => listener(results)
+    ipcRenderer.on(EVENTS.resultsChanged, handler)
+    return () => ipcRenderer.removeListener(EVENTS.resultsChanged, handler)
   },
 
   onJobProgress: (listener: (id: string, progress: JobProgress) => void) => {

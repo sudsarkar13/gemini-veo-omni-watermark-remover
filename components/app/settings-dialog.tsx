@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { Settings, SystemInfo } from "@gvowr/ipc"
+import type { Settings, StorageUsage, SystemInfo } from "@gvowr/ipc"
 
 import {
   Dialog,
@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -32,13 +33,22 @@ import { formatBytes } from "@/lib/format"
 export function SettingsDialog({
   settings,
   system,
+  usage,
   onChange,
+  onClearResults,
+  onOpenResultsFolder,
 }: {
   settings: Settings
   system: SystemInfo | null
+  usage: StorageUsage | null
   onChange: (partial: Partial<Settings>) => void
+  onClearResults: () => void
+  onOpenResultsFolder: () => void
 }) {
   const [open, setOpen] = useState(false)
+  // Clearing is destructive and irreversible, so it asks — inline rather than in a
+  // second dialog stacked on this one.
+  const [confirmClear, setConfirmClear] = useState(false)
 
   useEffect(() => {
     const handler = (): void => setOpen(true)
@@ -94,6 +104,79 @@ export function SettingsDialog({
               </SelectContent>
             </Select>
           </Row>
+
+          <Separator />
+
+          {/*
+            * Storage. A tool that keeps your renders has to show you how much room
+            * they take, where they are, and how to be rid of them — otherwise it is
+            * just a folder that fills up somewhere you never look.
+            */}
+          <Row
+            label="Keep results for"
+            hint="Results are kept in the app until you export them. Anything never exported is cleared automatically after this long."
+          >
+            <Select
+              value={String(settings.retentionDays)}
+              onValueChange={(value) => onChange({ retentionDays: Number(value) })}
+            >
+              <SelectTrigger className="h-8 w-40 text-[12px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">7 days</SelectItem>
+                <SelectItem value="30">30 days</SelectItem>
+                <SelectItem value="90">90 days</SelectItem>
+                <SelectItem value="0">Forever</SelectItem>
+              </SelectContent>
+            </Select>
+          </Row>
+
+          <Row
+            label="Storage used"
+            hint={usage?.directory ? usage.directory : undefined}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-muted-foreground tabular">
+                {usage ? `${formatBytes(usage.bytes)} · ${usage.count} kept` : "—"}
+              </span>
+              <Button variant="ghost" size="sm" className="h-8 text-[12px]" onClick={onOpenResultsFolder}>
+                Open folder
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-[12px] text-destructive/90 hover:text-destructive"
+                disabled={!usage || usage.count === 0}
+                onClick={() => setConfirmClear(true)}
+              >
+                Clear all
+              </Button>
+            </div>
+          </Row>
+
+          {confirmClear && (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
+              <span className="text-[12px] text-foreground">
+                Delete every kept result? Exported files are not touched.
+              </span>
+              <div className="flex shrink-0 gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setConfirmClear(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    onClearResults()
+                    setConfirmClear(false)
+                  }}
+                >
+                  Delete them
+                </Button>
+              </div>
+            </div>
+          )}
 
           <Separator />
 

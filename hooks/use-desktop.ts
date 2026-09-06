@@ -8,6 +8,8 @@ import type {
   Job,
   JobOptions,
   Settings,
+  StorageUsage,
+  StoredResult,
   SystemInfo,
 } from "@gvowr/ipc"
 import { DEFAULT_SETTINGS } from "@gvowr/ipc"
@@ -208,3 +210,70 @@ export function useFilmstripWindow(
 
 /** Long enough that a drag across the timeline asks for one window, not thirty. */
 const FILMSTRIP_DEBOUNCE_MS = 180
+
+/**
+ * Finished renders held by the application, and what can be done with them.
+ *
+ * Like jobs, the list lives in the main process and arrives as whole snapshots — the
+ * store is the only thing that knows whether a file is still on disk, and a renderer
+ * guessing at that would offer an Export for something already exported.
+ */
+export function useResults(): {
+  results: StoredResult[]
+  usage: StorageUsage | null
+  exportResult: (id: string) => Promise<void>
+  exportResultAs: (id: string) => Promise<void>
+  removeResult: (id: string) => Promise<void>
+  revealResult: (id: string) => Promise<void>
+  clearResults: () => Promise<void>
+  openFolder: () => Promise<void>
+} {
+  const [results, setResults] = useState<StoredResult[]>([])
+  const [usage, setUsage] = useState<StorageUsage | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    void desktop()
+      .listResults()
+      .then((initial) => {
+        if (!cancelled) setResults(initial)
+      })
+    void desktop()
+      .storageUsage()
+      .then((initial) => {
+        if (!cancelled) setUsage(initial)
+      })
+
+    // The store is the only thing that knows whether a file is still on disk, so the
+    // usage figure is re-read from it rather than derived from the rows.
+    const unsubscribe = desktop().onResultsChanged((next) => {
+      setResults(next)
+      void desktop()
+        .storageUsage()
+        .then((value) => {
+          if (!cancelled) setUsage(value)
+        })
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
+
+  return {
+    results,
+    usage,
+    exportResult: useCallback(async (id: string) => {
+      await desktop().exportResult(id)
+    }, []),
+    exportResultAs: useCallback(async (id: string) => {
+      await desktop().exportResultAs(id)
+    }, []),
+    removeResult: useCallback(async (id: string) => desktop().removeResult(id), []),
+    revealResult: useCallback(async (id: string) => desktop().revealResult(id), []),
+    clearResults: useCallback(async () => desktop().clearResults(), []),
+    openFolder: useCallback(async () => desktop().openResultsFolder(), []),
+  }
+}

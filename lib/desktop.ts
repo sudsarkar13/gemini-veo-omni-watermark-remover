@@ -42,6 +42,17 @@ const browserStub: DesktopApi = {
   }),
   getSettings: async (): Promise<Settings> => DEFAULT_SETTINGS,
   setSettings: async (partial) => ({ ...DEFAULT_SETTINGS, ...partial }),
+  listResults: async () => [],
+  exportResult: async () => {
+    throw new Error("Running in a browser. Launch the desktop app to export.")
+  },
+  exportResultAs: async () => null,
+  removeResult: async () => {},
+  revealResult: async () => {},
+  clearResults: async () => {},
+  storageUsage: async () => ({ bytes: 0, count: 0, directory: "" }),
+  openResultsFolder: async () => {},
+  onResultsChanged: () => () => {},
   minimiseWindow: () => {},
   maximiseWindow: () => {},
   closeWindow: () => {},
