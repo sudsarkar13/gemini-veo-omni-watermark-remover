@@ -86,7 +86,14 @@ export interface ResourceEstimate {
 }
 
 export interface JobProgress {
-  readonly stage: "analysing" | "rendering"
+  /**
+   * `checking` is Pass 4 — reading the finished file back to see what it still shows.
+   *
+   * Named in the meters rather than folded into `rendering` because it is a third
+   * decode the user can watch happening, and an unexplained extra pass reads as the
+   * app having stalled.
+   */
+  readonly stage: "analysing" | "rendering" | "checking"
   readonly frame: number
   readonly totalFrames: number
   readonly fraction: number
@@ -137,6 +144,46 @@ export interface JobResult {
    * person who drew the box. See `PLAN.md` §2.2.
    */
   readonly manualOutcomes: readonly ManualOutcomeSummary[]
+  /**
+   * What the finished file still shows. Null when the check did not run.
+   *
+   * Every other number here describes what the plan *decided*. This one describes the
+   * picture that came out, which is why it can disagree with all of them — and when it
+   * does, it is the one to believe. See `PLAN.md` §5, *Pass 4*.
+   */
+  readonly residual: ResidualSummary | null
+}
+
+/** A stretch of the render that still reads as marked. */
+export interface ResidualRangeSummary {
+  readonly from: number
+  /** Inclusive. */
+  readonly to: number
+  readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  /**
+   * `under-corrected` is a rectangle the plan touched and did not finish;
+   * `missed` is a place it never reached. Different faults, so they are not merged.
+   */
+  readonly kind: "missed" | "under-corrected"
+  readonly peakScore: number
+  readonly peakAlpha: number
+}
+
+export interface ResidualSummary {
+  readonly framesChecked: number
+  /** Distinct frames where something still reads as a mark. */
+  readonly framesMarked: number
+  readonly ranges: readonly ResidualRangeSummary[]
+  /**
+   * Frames between sweeps.
+   *
+   * A range starts at the first frame *confirmed* to carry the mark, and the mark may
+   * have appeared up to this many frames earlier — the check follows a leftover
+   * forward, never backward, because the earlier frames are already decoded and gone.
+   * Carried so the UI can state that rather than quietly widening the range.
+   */
+  readonly sweepInterval: number
+  readonly checkedAt: number
 }
 
 export interface ManualOutcomeSummary {
@@ -256,6 +303,8 @@ export interface StoredResult {
   readonly framesCorrected: number
   readonly framesFilled: number
   readonly framesUncovered: number
+  /** What the check made of this render, or null if it has not been checked. */
+  readonly residual: ResidualSummary | null
 }
 
 export interface StorageUsage {
@@ -324,6 +373,7 @@ export const CHANNELS = {
   resultsList: "results:list",
   resultsExport: "results:export",
   resultsExportAs: "results:export-as",
+  resultsCheck: "results:check",
   resultsRemove: "results:remove",
   resultsReveal: "results:reveal",
   resultsClear: "results:clear",
@@ -369,6 +419,14 @@ export interface DesktopApi {
   maximiseWindow(): void
   closeWindow(): void
   listResults(): Promise<StoredResult[]>
+  /**
+   * Re-runs the residual check against a stored render and returns the updated row.
+   *
+   * Against the render, not the source — the point of keeping results in the app is
+   * that a finished file can be re-examined by a better detector without paying for
+   * the removal again.
+   */
+  checkResult(id: string): Promise<StoredResult>
   /** Exports to the default folder. Returns the updated row. */
   exportResult(id: string): Promise<StoredResult>
   /** Opens a save dialog first. Null when the user cancels. */

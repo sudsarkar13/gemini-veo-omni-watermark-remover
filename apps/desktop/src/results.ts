@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { basename, dirname, extname, join } from "node:path"
 
-import type { MediaKind, StoredResult } from "@gvowr/ipc"
+import type { MediaKind, ResidualSummary, StoredResult } from "@gvowr/ipc"
 
 /**
  * Where a finished render lives until the user asks for it.
@@ -86,6 +86,23 @@ export class ResultStore {
     this.#entries = [record, ...this.#entries.filter((candidate) => candidate.id !== entry.id)]
     await this.#save()
     return record
+  }
+
+  /**
+   * Records a fresh verdict against a result that is already in the store.
+   *
+   * Kept on the row rather than recomputed on demand, because the check costs a whole
+   * decode and the answer does not change while the file does not — and a row that
+   * re-ran a sweep every time the list was drawn would make opening Results expensive
+   * in proportion to how much work the user had done.
+   */
+  async setResidual(id: string, residual: ResidualSummary | null): Promise<StoredResult> {
+    const entry = this.find(id)
+    if (!entry) throw new Error("that result is no longer in the store")
+    const updated: StoredResult = { ...entry, residual }
+    this.#entries = this.#entries.map((candidate) => (candidate.id === id ? updated : candidate))
+    await this.#save()
+    return updated
   }
 
   /**

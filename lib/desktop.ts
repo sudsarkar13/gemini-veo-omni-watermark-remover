@@ -47,6 +47,9 @@ const browserStub: DesktopApi = {
     throw new Error("Running in a browser. Launch the desktop app to export.")
   },
   exportResultAs: async () => null,
+  checkResult: async () => {
+    throw new Error("Running in a browser. Launch the desktop app to check a render.")
+  },
   removeResult: async () => {},
   revealResult: async () => {},
   clearResults: async () => {},

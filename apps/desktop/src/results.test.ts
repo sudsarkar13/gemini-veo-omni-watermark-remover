@@ -46,6 +46,7 @@ async function addResult(
     framesCorrected: 240,
     framesFilled: 0,
     framesUncovered: 0,
+    residual: null,
   })
 }
 
@@ -172,6 +173,47 @@ describe("ResultStore", () => {
     await store.load()
 
     assert.equal(store.list().length, 0)
+  })
+
+  it("records a verdict against a stored render, and survives a reload", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gvowr-results-"))
+    const store = new ResultStore(directory)
+    await store.load()
+    await addResult(store)
+
+    const updated = await store.setResidual("job-1", {
+      framesChecked: 240,
+      framesMarked: 12,
+      sweepInterval: 15,
+      checkedAt: Date.now(),
+      ranges: [
+        {
+          from: 100,
+          to: 111,
+          rect: { x: 10, y: 20, width: 48, height: 48 },
+          kind: "missed",
+          peakScore: 0.71,
+          peakAlpha: 1.02,
+        },
+      ],
+    })
+    assert.equal(updated.residual?.framesMarked, 12)
+
+    // The verdict costs a whole decode to produce, so it has to outlive the process
+    // that produced it — otherwise opening Results re-runs a sweep per row.
+    const reloaded = new ResultStore(directory)
+    await reloaded.load()
+    assert.equal(reloaded.find("job-1")?.residual?.framesMarked, 12)
+    assert.equal(reloaded.find("job-1")?.residual?.ranges[0]?.kind, "missed")
+  })
+
+  it("refuses to record a verdict against a result it no longer holds", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gvowr-results-"))
+    const store = new ResultStore(directory)
+    await store.load()
+    await addResult(store)
+
+    await assert.rejects(() => store.setResidual("nobody", null), /no longer in the store/)
   })
 
   it("names an export after the source, wherever it is going", () => {

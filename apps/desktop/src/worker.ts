@@ -1,9 +1,21 @@
 import { readFile } from "node:fs/promises"
 
-import { defaultTemplate, loadTemplatePpm, type AlphaMap } from "@gvowr/engine"
-import { processImage, processVideo } from "@gvowr/video"
+import { createResidualChecker, defaultTemplate, loadTemplatePpm, type AlphaMap } from "@gvowr/engine"
+import {
+  decodeFrames,
+  decodeImage,
+  probe,
+  probeImage,
+  processImage,
+  processVideo,
+} from "@gvowr/video"
 
-import type { JobOptions, ManualOutcomeSummary, MediaKind } from "@gvowr/ipc"
+import type {
+  JobOptions,
+  ManualOutcomeSummary,
+  MediaKind,
+  ResidualSummary,
+} from "@gvowr/ipc"
 
 /**
  * Child process that runs one job.
@@ -17,6 +29,24 @@ import type { JobOptions, ManualOutcomeSummary, MediaKind } from "@gvowr/ipc"
  * boundary; only counters and progress.
  */
 
+/**
+ * Re-runs the check against a file that has already been rendered.
+ *
+ * Standalone, and out of process for the same reason a job is: a decode plus a sweep
+ * over a long clip would hold the main process for as long as it takes, and the
+ * window would sit there not repainting.
+ *
+ * It carries no plan, so it can only ask the second of the check's two questions —
+ * was a mark missed. Under-shoot is found by re-scoring the rectangles the plan
+ * touched, and those are not kept once a run is over.
+ */
+export interface CheckMessage {
+  readonly type: "check"
+  readonly kind: MediaKind
+  readonly path: string
+  readonly templatePath?: string
+}
+
 export interface StartMessage {
   readonly type: "start"
   readonly kind: MediaKind
@@ -26,8 +56,14 @@ export interface StartMessage {
 }
 
 export type WorkerMessage =
-  | { type: "progress"; stage: "analysing" | "rendering"; frame: number; totalFrames: number }
+  | {
+      type: "progress"
+      stage: "analysing" | "rendering" | "checking"
+      frame: number
+      totalFrames: number
+    }
   | { type: "done"; result: WorkerResult }
+  | { type: "checked"; residual: ResidualSummary | null }
   | { type: "failed"; message: string }
 
 export interface WorkerResult {
@@ -46,6 +82,47 @@ export interface WorkerResult {
   readonly trackedTo: number
   readonly audioCopied: boolean
   readonly elapsedMs: number
+  /** What the finished file still shows, or null when nothing was written to check. */
+  readonly residual: ResidualSummary | null
+}
+
+/**
+ * The engine's residual report, flattened for IPC.
+ *
+ * Rebuilt field by field rather than passed through, because structured clone will
+ * happily carry engine internals across the process boundary and then the renderer
+ * starts depending on them.
+ */
+function summariseResidual(
+  report: {
+    framesChecked: number
+    framesMarked: number
+    sweepInterval: number
+    ranges: readonly {
+      from: number
+      to: number
+      rect: { x: number; y: number; width: number; height: number }
+      kind: "missed" | "under-corrected"
+      peakScore: number
+      peakAlpha: number
+    }[]
+  } | null
+): ResidualSummary | null {
+  if (!report) return null
+  return {
+    framesChecked: report.framesChecked,
+    framesMarked: report.framesMarked,
+    sweepInterval: report.sweepInterval,
+    checkedAt: Date.now(),
+    ranges: report.ranges.map((range) => ({
+      from: range.from,
+      to: range.to,
+      rect: range.rect,
+      kind: range.kind,
+      peakScore: range.peakScore,
+      peakAlpha: range.peakAlpha,
+    })),
+  }
 }
 
 async function loadTemplate(options: JobOptions): Promise<AlphaMap> {
@@ -101,7 +178,42 @@ function send(message: WorkerMessage): void {
   process.send?.(message)
 }
 
-process.on("message", (message: StartMessage) => {
+/** A check on its own, over a file that has already been written. */
+async function runCheck(message: CheckMessage): Promise<ResidualSummary | null> {
+  const template = await loadTemplate(
+    message.templatePath ? { templatePath: message.templatePath } : {}
+  )
+  const checker = createResidualChecker(template)
+
+  if (message.kind === "image") {
+    checker.push(await decodeImage(message.path, await probeImage(message.path)))
+  } else {
+    const info = await probe(message.path)
+    let checked = 0
+    for await (const frame of decodeFrames(message.path, info)) {
+      checker.push(frame)
+      checked++
+      send({ type: "progress", stage: "checking", frame: checked, totalFrames: info.frameCount })
+    }
+  }
+
+  return summariseResidual(checker.finish())
+}
+
+process.on("message", (message: StartMessage | CheckMessage) => {
+  if (message.type === "check") {
+    void (async () => {
+      try {
+        send({ type: "checked", residual: await runCheck(message) })
+      } catch (error) {
+        send({ type: "failed", message: error instanceof Error ? error.message : String(error) })
+      } finally {
+        process.exit(0)
+      }
+    })()
+    return
+  }
+
   if (message.type !== "start") return
 
   void (async () => {
@@ -136,6 +248,7 @@ process.on("message", (message: StartMessage) => {
             trackedTo: image.applied > 0 ? 0 : -1,
             audioCopied: false,
             elapsedMs: Date.now() - started,
+            residual: summariseResidual(image.residual),
           },
         })
         return
@@ -154,6 +267,9 @@ process.on("message", (message: StartMessage) => {
         },
         onRenderProgress: (frame, totalFrames) => {
           send({ type: "progress", stage: "rendering", frame, totalFrames })
+        },
+        onCheckProgress: (frame, totalFrames) => {
+          send({ type: "progress", stage: "checking", frame, totalFrames })
         },
       })
 
@@ -174,6 +290,7 @@ process.on("message", (message: StartMessage) => {
           trackedTo: result.coverage.lastFrame,
           audioCopied: result.audioCopied,
           elapsedMs: Date.now() - started,
+          residual: summariseResidual(result.residual),
         },
       })
     } catch (error) {

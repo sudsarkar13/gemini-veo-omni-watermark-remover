@@ -1,3 +1,4 @@
+import { fork } from "node:child_process"
 import { createReadStream } from "node:fs"
 import { mkdir, stat, writeFile } from "node:fs/promises"
 import { cpus, freemem, tmpdir, totalmem } from "node:os"
@@ -30,6 +31,8 @@ import {
   IMAGE_EXTENSIONS,
   kindOf,
   VIDEO_EXTENSIONS,
+  type MediaKind,
+  type ResidualSummary,
   EVENTS,
   type ClipMedia,
   type FilmstripWindow,
@@ -64,6 +67,8 @@ import { SettingsStore } from "./settings.ts"
 // module-scoped variable the loader provides. TypeScript treats this file as ESM
 // because it has imports, so it needs telling.
 declare const __dirname: string
+import type { WorkerMessage } from "./worker.ts"
+
 const here = __dirname
 /**
  * Claim our own identity before anything reads a path.
@@ -376,6 +381,39 @@ function contentType(path: string): string {
   return types[extension] ?? "application/octet-stream"
 }
 
+/**
+ * Runs the residual check over one file, in a worker.
+ *
+ * Out of process for the same reason a job is: the check decodes the whole clip, and
+ * doing that here would hold the main process — and with it every IPC reply and the
+ * window's own repaints — for as long as it takes.
+ */
+async function checkFile(path: string, kind: MediaKind): Promise<ResidualSummary | null> {
+  return await new Promise((resolveCheck, rejectCheck) => {
+    const child = fork(join(here, "worker.cjs"), [], { stdio: ["ignore", "pipe", "pipe", "ipc"] })
+    let settled = false
+
+    const finish = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      fn()
+    }
+
+    child.on("message", (message: WorkerMessage) => {
+      if (message.type === "checked") finish(() => resolveCheck(message.residual))
+      else if (message.type === "failed") finish(() => rejectCheck(new Error(message.message)))
+    })
+    // A worker that exits without answering has crashed. Reporting that as "no
+    // leftovers found" would be the worst possible failure mode for this feature.
+    child.on("exit", () =>
+      finish(() => rejectCheck(new Error("the check stopped before it reported anything")))
+    )
+    child.on("error", (error) => finish(() => rejectCheck(error)))
+
+    child.send({ type: "check", kind, path })
+  })
+}
+
 function registerHandlers(): void {
   ipcMain.handle(CHANNELS.jobsAdd, async (): Promise<Job[]> => {
     if (!window) return []
@@ -593,6 +631,20 @@ function registerHandlers(): void {
     }
   )
 
+  ipcMain.handle(CHANNELS.resultsCheck, async (_event, id: string): Promise<StoredResult> => {
+    const entry = results.find(id)
+    if (!entry) throw new Error("that result is no longer in the store")
+    // Against the stored render. Once exported there is no file here to read, and
+    // reaching out to wherever the user put it would be this app touching a file it
+    // no longer owns.
+    if (entry.exportedTo !== null) {
+      throw new Error("that result has been exported, so the app no longer holds a copy to check")
+    }
+    const updated = await results.setResidual(id, await checkFile(entry.storedPath, entry.kind))
+    broadcast(EVENTS.resultsChanged, results.list())
+    return updated
+  })
+
   ipcMain.handle(CHANNELS.resultsRemove, async (_event, id: string) => {
     await results.remove(id)
     broadcast(EVENTS.resultsChanged, results.list())
@@ -698,6 +750,7 @@ if (!app.requestSingleInstanceLock()) {
               framesCorrected: job.result?.framesCorrected ?? 0,
               framesFilled: job.result?.framesFilled ?? 0,
               framesUncovered: job.result?.framesUncovered ?? 0,
+              residual: job.result?.residual ?? null,
             })
             .then(() => broadcast(EVENTS.resultsChanged, results.list()))
         },

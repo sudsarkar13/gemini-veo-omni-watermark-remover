@@ -236,19 +236,24 @@ export class JobQueue {
       const elapsed = (now - running.lastSampleAt) / 1000
       if (elapsed > 0.25) {
         const frames = message.frame - running.lastFrame
-        // Smoothed, because a raw instantaneous rate jitters too much to read.
-        running.framesPerSecond =
-          running.framesPerSecond === 0
-            ? frames / elapsed
-            : running.framesPerSecond * 0.7 + (frames / elapsed) * 0.3
+        // A new pass restarts the frame counter, so this delta goes negative exactly
+        // once per transition. Folding that into the average reports a negative rate
+        // and drags the estimate down — and with three passes it now happens twice a
+        // run, so the sample is dropped rather than smoothed over.
+        if (frames >= 0) {
+          // Smoothed, because a raw instantaneous rate jitters too much to read.
+          running.framesPerSecond =
+            running.framesPerSecond === 0
+              ? frames / elapsed
+              : running.framesPerSecond * 0.7 + (frames / elapsed) * 0.3
+        }
         running.lastFrame = message.frame
         running.lastSampleAt = now
       }
 
-      // Two passes over the clip, so each contributes half of the reported progress.
       const stageFraction = message.totalFrames > 0 ? message.frame / message.totalFrames : 0
-      const fraction = message.stage === "analysing" ? stageFraction * 0.5 : 0.5 + stageFraction * 0.5
-      const remaining = message.totalFrames * (message.stage === "analysing" ? 2 : 1) - message.frame
+      const fraction = STAGE_START[message.stage] + stageFraction * STAGE_WEIGHT[message.stage]
+      const remaining = message.totalFrames * PASSES_LEFT[message.stage] - message.frame
 
       const progress: JobProgress = {
         stage: message.stage,
@@ -306,6 +311,11 @@ export class JobQueue {
       return
     }
 
+    // A standalone check reports here too when one is run through this worker script
+    // by another part of the app. It is not a job outcome, so the queue ignores it
+    // rather than inventing a state for a job that never asked for one.
+    if (message.type === "checked") return
+
     this.#update(id, { state: "failed", error: message.message, progress: null })
   }
 
@@ -332,6 +342,19 @@ export class JobQueue {
     this.#events.onChanged(this.list())
   }
 }
+
+/**
+ * What share of a run each pass is worth, for the progress bar.
+ *
+ * Declared rather than derived. The three passes cost genuinely different amounts —
+ * rendering carries the encode and dominates, checking is a decode plus a sampled
+ * sweep — and measuring the split per clip would make the bar jump backwards when a
+ * pass starts, which reads worse than a bar that is slightly optimistic.
+ */
+const STAGE_WEIGHT = { analysing: 0.4, rendering: 0.5, checking: 0.1 } as const
+const STAGE_START = { analysing: 0, rendering: 0.4, checking: 0.9 } as const
+/** Whole passes still to come, including the one in progress, for the ETA. */
+const PASSES_LEFT = { analysing: 3, rendering: 2, checking: 1 } as const
 
 export function isFinished(state: JobState): boolean {
   return (

@@ -51,6 +51,7 @@ const api: DesktopApi = {
   exportResult: (id) => ipcRenderer.invoke(CHANNELS.resultsExport, id) as Promise<StoredResult>,
   exportResultAs: (id) =>
     ipcRenderer.invoke(CHANNELS.resultsExportAs, id) as Promise<StoredResult | null>,
+  checkResult: (id) => ipcRenderer.invoke(CHANNELS.resultsCheck, id) as Promise<StoredResult>,
   removeResult: (id) => ipcRenderer.invoke(CHANNELS.resultsRemove, id) as Promise<void>,
   revealResult: (id) => ipcRenderer.invoke(CHANNELS.resultsReveal, id) as Promise<void>,
   clearResults: () => ipcRenderer.invoke(CHANNELS.resultsClear) as Promise<void>,
