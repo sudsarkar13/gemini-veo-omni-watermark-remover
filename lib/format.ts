@@ -41,7 +41,13 @@ export function truncateMiddle(value: string, max = 28): string {
 }
 
 export function describeClip(info: ClipInfo): string {
-  return `${info.width}×${info.height} · ${formatDuration(info.durationSeconds)} · ${formatBytes(info.sizeBytes)}`
+  // A still has no duration, and printing "0s" for one would be a small lie told
+  // repeatedly. Its format is the useful third fact instead.
+  const middle =
+    info.kind === "image"
+      ? (info.image?.format ?? "image").toUpperCase()
+      : formatDuration(info.durationSeconds)
+  return `${info.width}×${info.height} · ${middle} · ${formatBytes(info.sizeBytes)}`
 }
 
 export interface StateAppearance {

@@ -22,7 +22,7 @@ export function EmptyState({ system, onAdd }: { system: SystemInfo | null; onAdd
         </div>
 
         <div className="flex flex-col gap-2">
-          <h1 className="text-[17px] font-semibold">Drop a video to begin</h1>
+          <h1 className="text-[17px] font-semibold">Drop a video or image to begin</h1>
           <p className="text-[13px] leading-relaxed text-muted-foreground">
             Removes the visible Gemini and Veo watermark using exact maths — no blurring,
             no cropping, no generated pixels. Everything happens on this machine, and
@@ -32,10 +32,12 @@ export function EmptyState({ system, onAdd }: { system: SystemInfo | null; onAdd
 
         <Button onClick={onAdd}>
           <Upload className="size-4" />
-          Choose videos
+          Choose files
         </Button>
 
-        <p className="text-[11px] text-muted-foreground">MP4, MOV, MKV and WebM</p>
+        <p className="text-[11px] text-muted-foreground">
+          MP4, MOV, MKV, WebM · PNG, JPEG, WebP
+        </p>
 
         {system && !system.ffmpegAvailable && (
           <Alert variant="destructive" className="text-left">

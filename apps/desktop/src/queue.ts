@@ -4,10 +4,11 @@ import { stat } from "node:fs/promises"
 import { basename, dirname, extname, join } from "node:path"
 
 import { hasCalibratedProfile } from "@gvowr/engine"
-import { probe } from "@gvowr/video"
+import { canWrite, probe, probeImage } from "@gvowr/video"
 
 import { estimate } from "./estimate.ts"
 import { registerMedia, setMediaOutput, unregisterMedia } from "./media.ts"
+import { kindOf } from "@gvowr/ipc"
 import type { ClipInfo, Job, JobOptions, JobProgress, JobState } from "@gvowr/ipc"
 import type { StartMessage, WorkerMessage } from "./worker.ts"
 
@@ -104,8 +105,12 @@ export class JobQueue {
   }
 
   async #describe(path: string): Promise<ClipInfo> {
+    if (kindOf(path) === "image") return describeImage(path)
+
     const [info, stats] = await Promise.all([probe(path), stat(path)])
     return {
+      kind: "video",
+      image: null,
       width: info.width,
       height: info.height,
       frameRate: info.frameRate,
@@ -195,7 +200,13 @@ export class JobQueue {
       }
     })
 
-    const message: StartMessage = { type: "start", input: job.inputPath, output, options }
+    const message: StartMessage = {
+      type: "start",
+      kind: job.info.kind,
+      input: job.inputPath,
+      output,
+      options,
+    }
     child.send(message)
   }
 
@@ -246,10 +257,22 @@ export class JobQueue {
       // dishonesty this state exists to prevent.
       const incomplete = result.framesLeftUntouched > 0 || result.framesUncovered > 0
       const state: JobState =
-        result.tracksFound === 0 ? "no-mark-found" : incomplete ? "done-with-skips" : "done"
+        !result.written || result.tracksFound === 0
+          ? "no-mark-found"
+          : incomplete
+            ? "done-with-skips"
+            : "done"
 
-      setMediaOutput(id, output)
-      this.#update(id, { state, progress: null, result: { ...result, outputPath: output } })
+      // Nothing written means there is nothing to point the media protocol at, and
+      // nothing to reveal in the file manager. Registering the path anyway would give
+      // the UI a "Show file" button for a file that does not exist.
+      if (result.written) setMediaOutput(id, output)
+
+      this.#update(id, {
+        state,
+        progress: null,
+        result: { ...result, outputPath: result.written ? output : null },
+      })
       return
     }
 
@@ -288,6 +311,36 @@ export function isFinished(state: JobState): boolean {
     state === "failed" ||
     state === "cancelled"
   )
+}
+
+/**
+ * A still, described in the same shape as a clip.
+ *
+ * One frame, no rate, no duration, no audio — stated as zeroes rather than invented,
+ * and `kind` is what the UI branches on so it never renders a timeline for a picture.
+ */
+async function describeImage(path: string): Promise<ClipInfo> {
+  const [info, stats] = await Promise.all([probeImage(path), stat(path)])
+  return {
+    kind: "image",
+    image: {
+      format: info.format,
+      hasAlpha: info.hasAlpha,
+      lossyRoundTrip: info.lossyRoundTrip,
+      writable: await canWrite(info.format),
+    },
+    width: info.width,
+    height: info.height,
+    frameRate: 0,
+    durationSeconds: 0,
+    frameCount: 1,
+    videoCodec: info.codec,
+    hasAudio: false,
+    audioCodec: null,
+    bitRate: null,
+    sizeBytes: stats.size,
+    calibratedResolution: hasCalibratedProfile(info.width, info.height),
+  }
 }
 
 /** `clip.mp4` becomes `clip_clean.mp4`, beside the source unless told otherwise. */

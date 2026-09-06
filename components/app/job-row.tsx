@@ -5,6 +5,7 @@ import {
   Check,
   CircleSlash,
   Film,
+  Image as ImageIcon,
   Loader2,
   SearchX,
   XCircle,
@@ -52,7 +53,10 @@ export function JobRow({
   onSelect: () => void
 }) {
   const appearance = STATE_APPEARANCE[job.state]
-  const Icon = ICONS[job.state]
+  // A still gets a picture icon in its resting states, so a mixed queue can be read
+  // at a glance. The busy and finished icons still say what is happening to it.
+  const resting = job.state === "queued" || job.state === "ready"
+  const Icon = resting && job.info?.kind === "image" ? ImageIcon : ICONS[job.state]
   const busy = job.state === "analysing" || job.state === "processing"
 
   return (

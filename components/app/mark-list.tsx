@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils"
  */
 export function MarkList({
   marks,
+  still = false,
   selectedId,
   frameRate,
   frameCount,
@@ -35,6 +36,8 @@ export function MarkList({
   disabled,
 }: {
   marks: readonly ManualMarkInput[]
+  /** On a still there is one frame, so a frame range is not a thing to edit. */
+  still?: boolean
   selectedId: string | null
   frameRate: number
   frameCount: number
@@ -110,6 +113,9 @@ export function MarkList({
             </button>
 
             <div className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
+              {/* One frame means no range to edit and no timecode to show. */}
+              {!still && (
+                <>
               <Input
                 type="number"
                 min={0}
@@ -141,6 +147,8 @@ export function MarkList({
                 {formatTimecode(mark.fromFrame / frameRate)}–
                 {formatTimecode(mark.toFrame / frameRate)}
               </span>
+                </>
+              )}
               <Button
                 variant="ghost"
                 size="icon"

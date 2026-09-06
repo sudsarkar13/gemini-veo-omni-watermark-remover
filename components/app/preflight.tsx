@@ -52,8 +52,9 @@ export function Preflight({
         <Zap className="size-4 text-warning" />
         <AlertTitle className="text-warning">This one is heavy</AlertTitle>
         <AlertDescription className="text-muted-foreground">
-          {info.width}×{info.height} for {formatDuration(info.durationSeconds)} will work
-          the CPU hard. {body}
+          {info.width}×{info.height}
+          {info.kind === "image" ? "" : ` for ${formatDuration(info.durationSeconds)}`} will
+          work the CPU hard. {body}
         </AlertDescription>
       </Alert>
     )

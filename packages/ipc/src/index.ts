@@ -22,7 +22,28 @@ export type JobState =
   | "failed"
   | "cancelled"
 
+export type MediaKind = "video" | "image"
+
+/**
+ * What a still adds to `ClipInfo`.
+ *
+ * The format is not a preference: the result is written back in the format it came
+ * in, so this says what will happen to the file rather than what could.
+ */
+export interface ImageDetail {
+  readonly format: "png" | "jpeg" | "webp"
+  readonly hasAlpha: boolean
+  /** True for JPEG: the whole image is re-encoded, so untouched pixels move slightly. */
+  readonly lossyRoundTrip: boolean
+  /** False when this build of FFmpeg has no encoder for the format. */
+  readonly writable: boolean
+}
+
 export interface ClipInfo {
+  /** A still is a clip of length one, but the UI must not pretend it has a timeline. */
+  readonly kind: MediaKind
+  /** Present only for stills, null for video. */
+  readonly image: ImageDetail | null
   readonly width: number
   readonly height: number
   readonly frameRate: number
@@ -65,7 +86,16 @@ export interface JobProgress {
 }
 
 export interface JobResult {
-  readonly outputPath: string
+  /**
+   * Null when nothing was written and the original was left untouched.
+   *
+   * Only a still does this. A clip with bad frames is still worth producing with those
+   * frames reported; an image with one bad region is a bad image, so the run refuses.
+   */
+  readonly outputPath: string | null
+  /** False when the original was left alone; `reason` says why. */
+  readonly written: boolean
+  readonly reason: "no-mark-found" | "not-invertible" | null
   readonly tracksFound: number
   readonly tracksRejected: number
   readonly framesCorrected: number
@@ -250,4 +280,12 @@ export interface DesktopApi {
   onJobProgress(listener: (id: string, progress: JobProgress) => void): () => void
 }
 
-export const ACCEPTED_EXTENSIONS = ["mp4", "mov", "mkv", "webm"] as const
+export const VIDEO_EXTENSIONS = ["mp4", "mov", "mkv", "webm"] as const
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp"] as const
+export const ACCEPTED_EXTENSIONS = [...VIDEO_EXTENSIONS, ...IMAGE_EXTENSIONS] as const
+
+/** Which of the two things a job is. Everything downstream branches on this. */
+export function kindOf(path: string): MediaKind {
+  const extension = path.slice(path.lastIndexOf(".") + 1).toLowerCase()
+  return (IMAGE_EXTENSIONS as readonly string[]).includes(extension) ? "image" : "video"
+}

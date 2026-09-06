@@ -27,6 +27,9 @@ import {
 import {
   ACCEPTED_EXTENSIONS,
   CHANNELS,
+  IMAGE_EXTENSIONS,
+  kindOf,
+  VIDEO_EXTENSIONS,
   EVENTS,
   type ClipMedia,
   type FilmstripWindow,
@@ -43,7 +46,7 @@ import {
   setMediaThumbnails,
   thumbnailUrl,
 } from "./media.ts"
-import { JobQueue } from "./queue.ts"
+import { isFinished, JobQueue } from "./queue.ts"
 import { SettingsStore } from "./settings.ts"
 
 /**
@@ -217,6 +220,7 @@ async function createWindow(): Promise<void> {
            const id = jobs[0] && jobs[0].id
            if (!id) return "no-job"
            const clip = await window.gvowr.getMedia(id)
+           const kind = jobs[0].info ? jobs[0].info.kind : "unprobed"
            const strip = await window.gvowr.getFilmstrip(id, 0, 1, 8)
            // Loading one of them is the point: a URL the protocol cannot resolve looks
            // exactly like a URL it can until the picture fails to arrive. Loaded as an
@@ -232,6 +236,7 @@ async function createWindow(): Promise<void> {
              })
            }
            return [
+             "kind=" + kind,
              "thumbs=" + (clip ? clip.thumbnails.length : "null"),
              "window=" + (strip ? strip.thumbnails.length : "null"),
              "interval=" + (strip ? strip.interval.toFixed(3) : "null"),
@@ -240,6 +245,32 @@ async function createWindow(): Promise<void> {
          })()`
       )
       process.stdout.write(`SMOKE media ${media}\n`)
+    }
+
+    // Optionally run the job to completion, so the finished screen can be inspected
+    // rather than only the ready one. Bounded: a run that never terminates is a
+    // failure to report, not a reason to hang the check forever.
+    if (seed && process.env["GVOWR_SMOKE_RUN"] === "1") {
+      const [job] = queue.list()
+      if (job) {
+        queue.start(job.id)
+        const deadline = Date.now() + 180_000
+        let final = queue.list()[0]
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 500))
+          final = queue.list().find((candidate) => candidate.id === job.id)
+          if (final && isFinished(final.state)) break
+        }
+        process.stdout.write(
+          `SMOKE run state=${final?.state ?? "gone"} ` +
+            `written=${final?.result?.written ?? "n/a"} ` +
+            `reason=${final?.result?.reason ?? "none"} ` +
+            `corrected=${final?.result?.framesCorrected ?? "n/a"} ` +
+            `output=${final?.result?.outputPath ?? "none"}\n`
+        )
+        // Long enough for the renderer to receive the final snapshot and repaint.
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+      }
     }
 
     // Optional screenshot, so the rendered result can be inspected rather than
@@ -316,7 +347,11 @@ function registerHandlers(): void {
     const result = await dialog.showOpenDialog(window, {
       title: "Add videos",
       properties: ["openFile", "multiSelections"],
-      filters: [{ name: "Video", extensions: [...ACCEPTED_EXTENSIONS] }],
+      filters: [
+        { name: "Video and images", extensions: [...ACCEPTED_EXTENSIONS] },
+        { name: "Video", extensions: [...VIDEO_EXTENSIONS] },
+        { name: "Images", extensions: [...IMAGE_EXTENSIONS] },
+      ],
     })
     if (result.canceled || result.filePaths.length === 0) return []
     return queue.add(result.filePaths)
@@ -340,7 +375,9 @@ function registerHandlers(): void {
 
   ipcMain.handle(CHANNELS.jobsReveal, (_event, id: string) => {
     const job = queue.list().find((candidate) => candidate.id === id)
-    if (job?.result) shell.showItemInFolder(job.result.outputPath)
+    // Nothing to reveal when nothing was written — a still that found no mark leaves
+    // the original alone and produces no file.
+    if (job?.result?.outputPath) shell.showItemInFolder(job.result.outputPath)
   })
 
   /**
@@ -355,7 +392,29 @@ function registerHandlers(): void {
 
     const cached = mediaCache.get(id)
     if (cached) {
-      return { ...cached, outputUrl: job.result ? mediaUrl(id, "output") : null }
+      return { ...cached, outputUrl: job.result?.written ? mediaUrl(id, "output") : null }
+    }
+
+    // A still has no filmstrip and no waveform, and probing it as video would fail on
+    // the way to discovering that. It is one picture: the player shows it directly.
+    //
+    // Decided from the path, not from `job.info`. The renderer asks for media as soon
+    // as a job appears, which can be before the probe has landed — and a still that
+    // arrives here with `info` still null would go down the video path, cache a
+    // filmstrip made from the single picture, and keep showing it for the rest of the
+    // session. The extension is known the moment the file is dropped.
+    if (kindOf(job.inputPath) === "image") {
+      if (!job.info) return null
+      const media: ClipMedia = {
+        sourceUrl: mediaUrl(id, "source"),
+        outputUrl: job.result?.written ? mediaUrl(id, "output") : null,
+        thumbnails: [],
+        thumbnailInterval: 0,
+        waveform: null,
+        aspectRatio: job.info.width / job.info.height,
+      }
+      mediaCache.set(id, media)
+      return media
     }
 
     try {
@@ -369,7 +428,7 @@ function registerHandlers(): void {
 
       const media: ClipMedia = {
         sourceUrl: mediaUrl(id, "source"),
-        outputUrl: job.result ? mediaUrl(id, "output") : null,
+        outputUrl: job.result?.written ? mediaUrl(id, "output") : null,
         thumbnails: filmstrip.frames.map((frame) => thumbnailUrl(id, basename(frame))),
         thumbnailInterval: filmstrip.interval,
         waveform,
@@ -381,7 +440,7 @@ function registerHandlers(): void {
       // A clip that cannot be thumbnailed is still playable; degrade rather than fail.
       return {
         sourceUrl: mediaUrl(id, "source"),
-        outputUrl: job.result ? mediaUrl(id, "output") : null,
+        outputUrl: job.result?.written ? mediaUrl(id, "output") : null,
         thumbnails: [],
         thumbnailInterval: 0,
         waveform: null,

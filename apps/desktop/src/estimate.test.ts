@@ -7,6 +7,8 @@ import type { ClipInfo } from "@gvowr/ipc"
 
 function clip(patch: Partial<ClipInfo> = {}): ClipInfo {
   return {
+    kind: "video",
+    image: null,
     width: 1920,
     height: 1080,
     frameRate: 30,

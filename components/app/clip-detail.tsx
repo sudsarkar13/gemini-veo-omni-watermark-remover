@@ -50,14 +50,20 @@ export function ClipDetail({
   const [selectedMark, setSelectedMark] = useState<string | null>(null)
   const [marking, setMarking] = useState(false)
 
-  const frameRate = job.info?.frameRate ?? 30
+  const still = job.info?.kind === "image"
+  const frameRate = job.info?.frameRate || 30
   const frameCount = job.info?.frameCount ?? 0
   const currentFrame = Math.min(Math.max(0, Math.round(currentTime * frameRate)), Math.max(0, frameCount - 1))
   const seekToFrame = (frame: number): void => setCurrentTime(frame / frameRate)
 
   // Keyed on the output path so a finished run reloads the media and the comparison
-  // shows the render that just completed rather than a stale one.
-  const media = useClipMedia(job.id, job.result?.outputPath ?? null)
+  // shows the render that just completed rather than a stale one — and on whether the
+  // probe has landed, because a still cannot be described until it has, and the first
+  // ask can easily come first.
+  const media = useClipMedia(
+    job.id,
+    `${job.info ? "probed" : "unprobed"}:${job.result?.outputPath ?? ""}`
+  )
 
   const busy = job.state === "analysing" || job.state === "processing"
   const rerunnable = ["done", "done-with-skips", "no-mark-found", "failed", "cancelled"].includes(
@@ -72,10 +78,20 @@ export function ClipDetail({
         </h1>
         {job.info && (
           <p className="text-[11px] text-muted-foreground tabular">
-            {job.info.width}×{job.info.height} · {job.info.videoCodec} ·{" "}
-            {job.info.frameRate.toFixed(2)} fps · {formatDuration(job.info.durationSeconds)} ·{" "}
-            {formatBytes(job.info.sizeBytes)} ·{" "}
-            {job.info.hasAudio ? `audio ${job.info.audioCodec ?? ""}`.trim() : "no audio"}
+            {job.info.width}×{job.info.height} ·{" "}
+            {still ? (
+              <>
+                {(job.info.image?.format ?? "image").toUpperCase()} ·{" "}
+                {formatBytes(job.info.sizeBytes)}
+                {job.info.image?.hasAlpha ? " · transparency" : ""}
+              </>
+            ) : (
+              <>
+                {job.info.videoCodec} · {job.info.frameRate.toFixed(2)} fps ·{" "}
+                {formatDuration(job.info.durationSeconds)} · {formatBytes(job.info.sizeBytes)} ·{" "}
+                {job.info.hasAudio ? `audio ${job.info.audioCodec ?? ""}`.trim() : "no audio"}
+              </>
+            )}
           </p>
         )}
       </header>
@@ -92,6 +108,7 @@ export function ClipDetail({
           <ComparePlayer
             className="min-h-0 flex-1"
             media={media}
+            kind={job.info?.kind ?? "video"}
             frameRate={frameRate}
             frameWidth={job.info?.width ?? 0}
             currentTime={currentTime}
@@ -123,7 +140,7 @@ export function ClipDetail({
           <Skeleton className="min-h-0 flex-1 rounded-md" />
         )}
 
-        {media && (
+        {media && !still && (
           <Timeline
             className="shrink-0"
             jobId={job.id}
@@ -164,7 +181,7 @@ export function ClipDetail({
             </Alert>
           )}
 
-          {job.result && job.result.framesUncovered > 0 && (
+          {!still && job.result && job.result.framesUncovered > 0 && (
             <Alert className="border-warning/40 bg-warning/5 text-foreground">
               <AlertTriangle className="size-4 text-warning" />
               <AlertTitle className="text-warning">
@@ -187,20 +204,81 @@ export function ClipDetail({
             </Alert>
           )}
 
+          {/*
+            * A format this build of FFmpeg cannot write is said before the run, not
+            * after it. Doing the work and then discovering there is nowhere to put it
+            * wastes the user's time and teaches them nothing.
+            */}
+          {job.info?.image && !job.info.image.writable && (
+            <Alert variant="destructive">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>
+                This build cannot write {job.info.image.format.toUpperCase()} files
+              </AlertTitle>
+              <AlertDescription>
+                The bundled FFmpeg has no encoder for {job.info.image.format.toUpperCase()},
+                so the result could be found but not saved. This is a packaging fault, not
+                something you did — please report it.
+              </AlertDescription>
+            </Alert>
+          )}
+
           {job.state === "no-mark-found" && (
             <Alert>
               <SearchX className="size-4" />
-              <AlertTitle>No watermark found</AlertTitle>
+              <AlertTitle>
+                {job.result && !job.result.written && job.result.reason === "not-invertible"
+                  ? "Found something, but could not remove it"
+                  : "No watermark found"}
+              </AlertTitle>
               <AlertDescription>
-                Nothing in this clip inverted cleanly into its surroundings, so nothing was
-                changed. If you can see a mark, try Full-frame sweep in Advanced, or adjust
-                the mark size to match what you see.
+                {still ? (
+                  job.result?.reason === "not-invertible" ? (
+                    <>
+                      Something matched the mark here, but no intensity put it back in line
+                      with its surroundings — which is what a real composite does. Nothing
+                      was written and your original is untouched. Drawing the region by hand
+                      tells the search where to look; it still measures before removing.
+                    </>
+                  ) : (
+                    <>
+                      Nothing in this image inverted cleanly into its surroundings, so
+                      nothing was written and your original is untouched. If you can see a
+                      mark, draw a box over it with Mark.
+                    </>
+                  )
+                ) : (
+                  <>
+                    Nothing in this clip inverted cleanly into its surroundings, so nothing
+                    was changed. If you can see a mark, try Full-frame sweep in Advanced, or
+                    adjust the mark size to match what you see.
+                  </>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/*
+            * Said after a successful JPEG run, because the result is not what a PNG
+            * result is. The removal is exact; the file is not, and implying otherwise
+            * would be the quiet kind of dishonesty this project avoids.
+            */}
+          {still && job.result?.written && job.info?.image?.lossyRoundTrip && (
+            <Alert>
+              <AlertTriangle className="size-4" />
+              <AlertTitle>Saved as JPEG, so the whole image was re-encoded</AlertTitle>
+              <AlertDescription>
+                A JPEG cannot be edited in place. The mark was removed exactly, then the
+                image was written back at the highest quality the encoder offers — pixels
+                nowhere near the mark still change slightly. A PNG source would come back
+                with every untouched pixel identical.
               </AlertDescription>
             </Alert>
           )}
 
           <MarkList
             marks={marks}
+            still={still}
             selectedId={selectedMark}
             frameRate={frameRate}
             frameCount={frameCount}
@@ -226,23 +304,25 @@ export function ClipDetail({
             <Preflight info={job.info} estimate={job.estimate} />
           )}
 
-          <AdvancedDrawer options={options} onChange={setOptions} disabled={busy} />
+          <AdvancedDrawer options={options} onChange={setOptions} disabled={busy} still={still} />
         </div>
       </div>
 
       <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-sidebar px-4 py-2.5">
         <div className="min-w-0 text-[11px] text-muted-foreground">
-          {job.result ? (
+          {job.result?.outputPath ? (
             <span className="truncate" title={job.result.outputPath}>
               Saved to {job.result.outputPath}
             </span>
+          ) : job.result && !job.result.written ? (
+            <span>Nothing was written — the original is untouched.</span>
           ) : (
             <span>Output is written next to the original.</span>
           )}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {job.result && (
+          {job.result?.outputPath && (
             <Button variant="secondary" size="sm" onClick={onReveal}>
               <FolderOpen className="size-4" />
               Show file
@@ -256,7 +336,7 @@ export function ClipDetail({
           ) : (
             <Button
               size="sm"
-              disabled={!job.info}
+              disabled={!job.info || job.info.image?.writable === false}
               onClick={() => {
                 // Starting a run ends marking: what happens next is something to
                 // look at, and the comparison views are what it is for.

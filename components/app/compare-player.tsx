@@ -2,7 +2,7 @@
 
 import { Maximize, Minus, Pause, Play, Plus, SkipBack, SkipForward, SquareDashed } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import type { ClipMedia } from "@gvowr/ipc"
+import type { ClipMedia, MediaKind } from "@gvowr/ipc"
 
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
@@ -97,6 +97,7 @@ function zoomAt(view: View, requested: number, screenX: number, screenY: number,
 export function ComparePlayer({
   className,
   media,
+  kind,
   frameRate,
   frameWidth,
   currentTime,
@@ -109,6 +110,8 @@ export function ComparePlayer({
 }: {
   className?: string
   media: ClipMedia
+  /** A still has no transport: nothing to play, one frame to step through. */
+  kind: MediaKind
   frameRate: number
   /** Source width in pixels, so "100%" can mean one screen pixel per source pixel. */
   frameWidth: number
@@ -127,6 +130,7 @@ export function ComparePlayer({
   const layerRef = useRef<HTMLDivElement>(null)
 
   const hasAfter = media.outputUrl !== null
+  const still = kind === "image"
   const [playing, setPlaying] = useState(false)
   const [split, setSplit] = useState(0.5)
   const [view, setView] = useState<View>(FIT)
@@ -418,23 +422,33 @@ export function ComparePlayer({
             style={geometry.before}
           >
             <div className="absolute inset-0" style={stageStyle}>
-              <video
-                ref={beforeRef}
-                src={media.sourceUrl}
-                className="absolute inset-0 size-full object-contain"
-                onTimeUpdate={(event) => {
-                  onTimeChange(event.currentTarget.currentTime)
-                  syncAfter()
-                }}
-                onLoadedMetadata={(event) => {
-                  onDurationChange(event.currentTarget.duration)
-                  // A finished run swaps in new media, which reloads the element and
-                  // drops the playhead to zero. Restoring it keeps the frame under
-                  // inspection under inspection.
-                  if (currentTime > 0) event.currentTarget.currentTime = currentTime
-                }}
-                onEnded={() => setPlaying(false)}
-              />
+              {still ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={media.sourceUrl}
+                  alt="Original"
+                  draggable={false}
+                  className="absolute inset-0 size-full object-contain"
+                />
+              ) : (
+                <video
+                  ref={beforeRef}
+                  src={media.sourceUrl}
+                  className="absolute inset-0 size-full object-contain"
+                  onTimeUpdate={(event) => {
+                    onTimeChange(event.currentTarget.currentTime)
+                    syncAfter()
+                  }}
+                  onLoadedMetadata={(event) => {
+                    onDurationChange(event.currentTarget.duration)
+                    // A finished run swaps in new media, which reloads the element and
+                    // drops the playhead to zero. Restoring it keeps the frame under
+                    // inspection under inspection.
+                    if (currentTime > 0) event.currentTarget.currentTime = currentTime
+                  }}
+                  onEnded={() => setPlaying(false)}
+                />
+              )}
               {/*
                * The overlay rides inside the transform, so a region drawn at 400% lands
                * on the frame pixels it was drawn over. It also lives in the *before*
@@ -448,12 +462,22 @@ export function ComparePlayer({
           {hasAfter && (
             <div className="absolute inset-y-0 overflow-hidden" style={geometry.after}>
               <div className="absolute inset-0" style={stageStyle}>
-                <video
-                  ref={afterRef}
-                  src={media.outputUrl ?? undefined}
-                  muted
-                  className="absolute inset-0 size-full object-contain"
-                />
+                {still ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={media.outputUrl ?? undefined}
+                    alt="Cleaned"
+                    draggable={false}
+                    className="absolute inset-0 size-full object-contain"
+                  />
+                ) : (
+                  <video
+                    ref={afterRef}
+                    src={media.outputUrl ?? undefined}
+                    muted
+                    className="absolute inset-0 size-full object-contain"
+                  />
+                )}
               </div>
             </div>
           )}
@@ -494,19 +518,25 @@ export function ComparePlayer({
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-        <Button variant="ghost" size="icon" className="size-8" aria-label="Previous frame" onClick={() => step(-1)}>
-          <SkipBack className="size-4" />
-        </Button>
-        <Button variant="secondary" size="icon" className="size-8" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
-          {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
-        </Button>
-        <Button variant="ghost" size="icon" className="size-8" aria-label="Next frame" onClick={() => step(1)}>
-          <SkipForward className="size-4" />
-        </Button>
+        {/* Absent rather than disabled on a still: there is nothing to play and one
+            frame to step through, and a row of dead buttons is worse than no row. */}
+        {!still && (
+          <>
+            <Button variant="ghost" size="icon" className="size-8" aria-label="Previous frame" onClick={() => step(-1)}>
+              <SkipBack className="size-4" />
+            </Button>
+            <Button variant="secondary" size="icon" className="size-8" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
+              {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
+            </Button>
+            <Button variant="ghost" size="icon" className="size-8" aria-label="Next frame" onClick={() => step(1)}>
+              <SkipForward className="size-4" />
+            </Button>
 
-        <span className="ml-1 text-[11px] text-muted-foreground tabular">
-          {formatTimecode(currentTime)}
-        </span>
+            <span className="ml-1 text-[11px] text-muted-foreground tabular">
+              {formatTimecode(currentTime)}
+            </span>
+          </>
+        )}
 
         {canMark && (
           <Button
@@ -592,9 +622,10 @@ export function ComparePlayer({
 
       {marking ? (
         <p className="shrink-0 text-[11px] text-muted-foreground">
-          Drag on the picture to draw a box over a watermark the detector missed. It
-          applies from this frame to the end of the clip unless you narrow the range.
-          Scroll to zoom in first if the mark is small.
+          Drag on the picture to draw a box over a watermark the detector missed.
+          {still
+            ? " Scroll to zoom in first if the mark is small."
+            : " It applies from this frame to the end of the clip unless you narrow the range. Scroll to zoom in first if the mark is small."}
         </p>
       ) : zoomed ? (
         <p className="shrink-0 text-[11px] text-muted-foreground">
@@ -604,7 +635,8 @@ export function ComparePlayer({
       ) : (
         !hasAfter && (
           <p className="shrink-0 text-[11px] text-muted-foreground">
-            Showing the original. Run the removal to compare it against the cleaned version.
+            Showing the original. Run the removal to compare it against the cleaned{" "}
+            {still ? "image" : "version"}.
           </p>
         )
       )}

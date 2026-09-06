@@ -39,10 +39,13 @@ export function AdvancedDrawer({
   options,
   onChange,
   disabled,
+  still = false,
 }: {
   options: JobOptions
   onChange: (options: JobOptions) => void
   disabled: boolean
+  /** A still has no encoder, no quality setting and no sweep interval to space out. */
+  still?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const set = <K extends keyof JobOptions>(key: K, value: JobOptions[K]): void =>
@@ -79,6 +82,13 @@ export function AdvancedDrawer({
             </Select>
           </Field>
 
+          {/*
+            * Encoder, quality and sweep interval are video settings. On a still they
+            * would be controls that do nothing, which is worse than their absence:
+            * a control that is present implies it matters.
+            */}
+          {!still && (
+            <>
           <Field label="Encoder">
             <Select
               value={options.encoder ?? "auto"}
@@ -121,6 +131,8 @@ export function AdvancedDrawer({
               onChange={(event) => set("sweepInterval", Number(event.target.value) || 15)}
             />
           </Field>
+            </>
+          )}
 
           <div className="col-span-2 flex justify-end">
             <Button

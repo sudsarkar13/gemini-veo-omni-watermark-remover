@@ -45,7 +45,7 @@ export function QueueSidebar({
         <div className="flex flex-col gap-1 p-2">
           {jobs.length === 0 ? (
             <p className="px-2 py-6 text-center text-[12px] leading-relaxed text-muted-foreground">
-              No videos yet.
+              Nothing queued yet.
               <br />
               Drop files anywhere, or add them below.
             </p>

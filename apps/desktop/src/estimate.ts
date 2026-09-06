@@ -25,6 +25,18 @@ const MS_PER_MEGAPIXEL_PER_PASS = 14
 /** Analysis and render are two passes over the clip, plus encode overhead. */
 const PASSES = 2.4
 
+/**
+ * A still is one frame, but not one frame's worth of work.
+ *
+ * The per-frame video figure would predict six milliseconds for a photo, because on
+ * video the full-frame sweep is amortised over fifteen frames and here it *is* the
+ * job. Measured end to end: 2.8 s at 0.92 MP and 13.4 s at 8.3 MP — nine times the
+ * pixels for under five times the time, which the exponent below tracks. Claiming six
+ * milliseconds would make the pre-flight line worse than no line at all.
+ */
+const STILL_SECONDS_PER_MEGAPIXEL = 3
+const STILL_SCALING = 0.7
+
 export function estimate(info: ClipInfo, concurrency = 1): ResourceEstimate {
   const cores = Math.max(1, cpus().length)
   const megapixels = (info.width * info.height) / 1_000_000
@@ -33,7 +45,9 @@ export function estimate(info: ClipInfo, concurrency = 1): ResourceEstimate {
   // Work parallelises well but not perfectly, and hyperthreads are not full cores.
   const effectiveCores = Math.max(1, Math.min(cores, 8) * 0.6)
   const seconds =
-    (megapixels * frames * MS_PER_MEGAPIXEL_PER_PASS * PASSES) / 1000 / effectiveCores
+    info.kind === "image"
+      ? STILL_SECONDS_PER_MEGAPIXEL * Math.pow(Math.max(0.01, megapixels), STILL_SCALING)
+      : (megapixels * frames * MS_PER_MEGAPIXEL_PER_PASS * PASSES) / 1000 / effectiveCores
 
   // Frames are streamed, so peak memory is a working set of a few frames plus the
   // integral tables, not the whole clip.
