@@ -158,8 +158,8 @@ only — never for editing region or alpha, which are per-clip by nature.
 | Control | Type | Default | Behaviour |
 | --- | --- | --- | --- |
 | Compare mode | Segmented | Split | `Split` (draggable divider) · `Side-by-side` · `Before` · `After` · `Difference` (amplified delta — the honest way to inspect residue). |
-| Zoom | Slider + buttons | Fit | Fit · 100% · up to 800%. Scroll-wheel zooms at cursor. |
-| Pan | Drag | — | Space-drag or middle-drag when zoomed. |
+| Zoom | Slider + buttons | Fit | Fit · 100% · up to 800%, as a percentage of source pixels rather than of the pane. Scroll-wheel zooms at the cursor. Above 100% the picture is drawn nearest-neighbour: an interpolated pixel is an invented one, and this view exists to judge pixels. Both halves of a comparison carry the identical transform, so they stay registered at any magnification. |
+| Pan | Drag | — | Middle-drag always; left-drag when zoomed, except in Split (where it moves the divider) and Mark (where it draws). Space is play/pause and is not a pan modifier. |
 | Mark region | Drag on the canvas | — | Draws a box over a watermark the detector missed. Enters **Mark** mode; the pointer draws instead of panning. See §5.6. |
 | Loupe | Toggle | Off | Magnified inset locked to the active watermark region — the fastest way to judge removal quality. |
 | Frame step | Buttons + `,` / `.` | — | Previous / next frame. |

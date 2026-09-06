@@ -93,6 +93,7 @@ export function ClipDetail({
             className="min-h-0 flex-1"
             media={media}
             frameRate={frameRate}
+            frameWidth={job.info?.width ?? 0}
             currentTime={currentTime}
             onTimeChange={setCurrentTime}
             onDurationChange={setDuration}

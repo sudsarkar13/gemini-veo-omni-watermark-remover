@@ -45,7 +45,10 @@ export function MarkOverlay({
   onSelect: (id: string) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [start, setStart] = useState<{ x: number; y: number } | null>(null)
+  // Where the drag began. A ref, not state, for the same reason as the draft below:
+  // it is read by the very next pointer event, and a state value read there is one
+  // render behind.
+  const start = useRef<{ x: number; y: number } | null>(null)
 
   // The draft lives in a ref as well as in state. State drives what is drawn; the ref
   // is what gets committed, because a fast drag can finish inside a single React
@@ -95,15 +98,16 @@ export function MarkOverlay({
         const point = toFrame(event)
         if (!point) return
         event.currentTarget.setPointerCapture(event.pointerId)
-        setStart(point)
+        start.current = point
         draft.current = { ...point, size: 0 }
         setBox(draft.current)
       }}
       onPointerMove={(event) => {
-        if (!start) return
+        const origin = start.current
+        if (!origin) return
         const point = toFrame(event)
         if (!point) return
-        draft.current = square(start, point)
+        draft.current = square(origin, point)
         setBox(draft.current)
       }}
       onPointerUp={() => {
@@ -125,7 +129,7 @@ export function MarkOverlay({
           })
         }
         draft.current = null
-        setStart(null)
+        start.current = null
         setBox(null)
       }}
     >
