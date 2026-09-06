@@ -142,7 +142,7 @@ Every control the application ships. Nothing outside this list gets built.
 
 | Control | Type | Behaviour |
 | --- | --- | --- |
-| Add files | Button + drop target | Native file picker, multi-select. Accepts `.mp4 .mov .mkv .webm`. |
+| Add files | Button + drop target | Native file picker, multi-select. Accepts video `.mp4 .mov .mkv .webm` and stills `.png .jpg .jpeg .webp` — see §5.7. |
 | Job row | List item | Thumbnail, filename (truncated middle, full path on hover), resolution, duration, status. |
 | Row status | Icon + label | `queued` · `analysing` · `processing %` · `done` · `skipped frames` · `failed`. |
 | Row context menu | Right-click | Reveal in Finder/Explorer · Remove from queue · Retry · Copy diagnostics. |
@@ -220,6 +220,41 @@ enters the tracker like any other, so a mark that moves is followed from there.
 
 Regions persist with the job so a re-run keeps them, and are listed in the diagnostics
 report as counts and rectangles — never as pixels.
+
+### 5.7 Still images
+
+Gemini stamps its images with the same kind of overlay it stamps on video, and the
+engine works one frame at a time regardless — so a photo is a clip of length one and
+goes in the same queue, alongside clips, in any mix.
+
+The screen is the one already specified, with the parts that mean nothing for a still
+absent rather than disabled:
+
+| Element | With a still |
+| --- | --- |
+| Preview canvas | Unchanged. Split · Side-by-side · Before · After all work, and zoom matters *more* here — an image is usually larger than the pane. |
+| Transport (play, frame step, timecode) | Absent. There is nothing to play and one frame to step through. |
+| Track timeline | Absent. It is a picture of time. |
+| Mark mode | Unchanged, minus the frame range: a region drawn on a still applies to the still. |
+| Advanced drawer | Detection mode, alpha, mark variant and manual region apply. Video-only rows — sweep interval, denoise, codec, CRF, encoder — are hidden. |
+| Pre-flight estimate | A line rather than a card. A still is about half a second. |
+| Header metadata | `1920×1080 · PNG · 2.4 MB · alpha` in place of the clip's codec and duration line. |
+
+**Detection runs as a full-frame sweep by default**, because on one frame it costs
+almost nothing and there is no reason to look only in the corner. It is verified at the
+discovery bar rather than the tracking bar: with no neighbouring frames to agree with,
+reversibility is the only evidence there is.
+
+**When nothing verifies, no file is written.** A clip with five bad frames is still worth
+producing with those frames reported; an image with one bad frame is a bad image. The UI
+says the mark was not found, or was found and could not be inverted, and leaves the
+original alone.
+
+**The output format follows the input**, and the UI is explicit about what that costs.
+PNG and WebP are written losslessly and every untouched pixel survives exactly. A JPEG
+cannot be edited without re-encoding the whole image, so the result card says so in
+words — "re-encoded at maximum quality; pixels outside the mark change slightly" —
+rather than implying an edit as surgical as the PNG case.
 
 ### 5.4 Advanced drawer
 

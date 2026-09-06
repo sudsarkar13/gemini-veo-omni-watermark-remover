@@ -18,6 +18,10 @@ Windows, and Ubuntu/Linux**. Free and open source, with a polished UI.
 
 - Mathematically exact removal — no blur, no crop, no hallucinated pixels.
 - Detect the watermark **anywhere in the frame**, not just the bottom-right corner.
+- **Stills as well as video.** Gemini stamps its images with the same kind of overlay,
+  and the engine already works one frame at a time (see [§5](#5-engine-architecture)),
+  so a photo is a clip of length one. Refusing to open a PNG would be a limit of the
+  shell, not of the tool.
 - Batch processing, native hardware decode/encode, no browser file-size ceiling.
 - A UI that is pleasant to use, not a debug panel.
 - Signed, distributable installers for all three platforms.
@@ -226,6 +230,39 @@ frames were left alone rather than silently passing.
 Reverse blend per track per frame, optional FDnCNN denoise on touched ROIs only,
 re-encode at CRF 14 / preset slow with audio stream-copied.
 
+### Still images — the same engine, one frame
+
+A Gemini image carries the same kind of composited overlay as a Veo clip, so it needs
+no new algorithm: detection, reversibility verification and reverse blending all work on
+a single frame and already do. What a still changes is everything around the frame.
+
+- **No tracking, and nothing to interpolate.** Persistence, velocity and two-sided
+  interpolation all mean "agrees with the frames around it", and there are none. The
+  reversibility verifier is therefore the *only* thing standing between a bright patch
+  of content and a diamond subtracted out of it — so a still is verified at the
+  discovery bar, never the tracking bar.
+- **Full-frame sweep is the default**, not an Advanced option. On video a sweep every
+  frame is unaffordable; on one frame it costs about half a second. There is no reason
+  to look only in the corner.
+- **Failure means the file is not written.** A video with five bad frames is still worth
+  producing, with those frames reported. An image with one bad frame is a bad image, so
+  when nothing verifies, nothing is written and the UI says why.
+- **I/O is FFmpeg, as everywhere else.** No image library is added: FFmpeg already
+  decodes and encodes PNG, JPEG and WebP, and adding `sharp` would mean a native binary
+  per platform for something the existing sidecar does.
+- **Alpha is carried through untouched.** A PNG's transparency is decoded alongside the
+  colour, held aside during the blend, and re-attached on write. Reverse blending is
+  defined on the colour channels; the alpha channel is not ours to touch.
+- **Lossless in, lossless out.** PNG is written as PNG and WebP as lossless WebP. A JPEG
+  cannot be edited without re-encoding the whole image, so it is written back at the
+  highest quality the encoder offers and the UI says plainly that the file was
+  re-encoded. Metadata is copied where FFmpeg can carry it.
+
+Image marks are also a different size from Veo's — 48×48 at every output size for Gemini
+3.6, 36×36 and 96×96 for 3.5 (see [§3](#known-calibration-data)) — and none of those
+margins have been measured here. The sweep finds the mark without a margin; the profiles
+are an optimisation we have not earned yet on stills.
+
 ### Core data model
 
 The output of detection is **not a rectangle**. It is a set of tracks, which is what
@@ -384,6 +421,9 @@ Both paths emit the same payload so triage stays uniform.
 - [ ] **Phase 4 — UI.** Built to [`UI-SPEC.md`](UI-SPEC.md): two-pane queue + preview,
       track timeline, Advanced drawer, pre-flight estimate and live resource meters.
       *Nothing outside that spec gets built without updating it first.*
+- [ ] **Phase 4b — Still images.** Image I/O through the FFmpeg sidecar, the single-frame
+      path through the existing engine, queue and UI support for stills alongside clips.
+      *No new algorithm — the engine already works one frame at a time.*
 - [ ] **Phase 5 — Diagnostics & feedback.** Report composer, review dialog, ROI-crop
       attachment, Settings > Diagnostics page, `PRIVACY.md`, GitHub-issue transport.
       *Tier 1 structured logging is built in Phase 1, not deferred to here* — the
